@@ -3,6 +3,7 @@
 import os, os.path, logging
 import sys, argparse
 import time, json
+import urlparse
 from telebot import Bot, BotRequestHandler
 import paho.mqtt.client as mqtt
 from cStringIO import StringIO
@@ -11,20 +12,18 @@ import re
 
 
 class HomeBotHandler(BotRequestHandler):
-   def __init__(self, mqtt_address, auth=None):
+   def __init__(self, mqtt_url ):
        self.logger = logging.getLogger(self.__class__.__name__)
 
-       d = mqtt_address.split(":")
-       host = d[0]
-       port = int(d[1]) if len(d)>1 else 1883
+       host = mqtt_url.hostname
+       port = mqtt_url.port if mqtt_url!=None else 1883
 
        #self.carbon = CarbonMetricStore()
        self.logger.info("Trying connect to MQTT broker at %s:%d" % (host, port) )
 
        self.mqttc = mqtt.Client()
-       if auth!=None:
-          auth = auth.split(":")
-          self.mqttc.username_pw_set( auth[0], auth[1] )
+       if mqtt_url.username!=None:
+          self.mqttc.username_pw_set( mqtt_url.username, mqtt_url.password )
 
        self.mqttc.on_connect = self._on_connect
        self.mqttc.on_message = self._on_message
@@ -35,8 +34,9 @@ class HomeBotHandler(BotRequestHandler):
        pass
 
    def _on_connect( self, client, obj, flags, rc ):
-       self.logger.info("Connection to MQTT broker: %d", rc)
-       self.mqttc.subscribe("/home/alarm/#")
+       self.logger.info("MQTT broker: %s", mqtt.connack_string(rc) )
+       if rc==0:
+          self.mqttc.subscribe("/home/alarm/#")
        pass
 
    def _on_message( self, mosq, obj, msg ):
@@ -111,8 +111,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument( "-c", "--config", type=open, action=LoadFromFile, help="Load config from file" )
-    parser.add_argument( "--mqtt", default="localhost:1883",  help="MQTT Broker address host:port" )
-    parser.add_argument( "--auth")
+    parser.add_argument( "-u","--url", default="localhost:1883", type=urlparse.urlparse, help="MQTT Broker address host:port"  )
     parser.add_argument( "--token",   help="Telegram API bot token" )
     parser.add_argument( "--admin",   nargs="+", help="Bot admin", type=int, dest="admins" )
     parser.add_argument( "-v", action="store_true", default=False, help="Verbose logging", dest="verbose" )
@@ -123,7 +122,7 @@ if __name__ == '__main__':
     logging.basicConfig( format="[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",  level=logging.DEBUG if args.verbose else logging.INFO, filename=args.logfile )
     logging.info("Starting telgarm bot")
 
-    handler = HomeBotHandler( args.mqtt, args.auth )
+    handler = HomeBotHandler( args.url )
     bot     = Bot( args.token, args.admins, handler )
 
     bot.loop_start()
