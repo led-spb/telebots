@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
 
 import os, os.path, logging
 import sys, argparse
@@ -18,7 +19,6 @@ class HomeBotHandler(BotRequestHandler):
        host = mqtt_url.hostname
        port = mqtt_url.port if mqtt_url!=None else 1883
 
-       #self.carbon = CarbonMetricStore()
        self.logger.info("Trying connect to MQTT broker at %s:%d" % (host, port) )
 
        self.mqttc = mqtt.Client()
@@ -28,8 +28,7 @@ class HomeBotHandler(BotRequestHandler):
        self.mqttc.on_connect = self._on_connect
        self.mqttc.on_message = self._on_message
        self.mqttc.connect( host, port, 60 )
-       self.mqttc.loop_start()
-
+       #self.mqttc.loop_start()
        self.subscribe = False
        pass
 
@@ -83,7 +82,7 @@ class HomeBotHandler(BotRequestHandler):
 
        if event_type=='videom' or (self.subscribe and event_type=='video'):
           self.subscribe = False
-          return { 'video': ('video.mp4', StringIO(payload),'video/mp4') }
+          return { 'video': ('video.mp4', StringIO(payload), 'video/mp4') }
 
        return None
 
@@ -120,15 +119,14 @@ if __name__ == '__main__':
 
     # configure logging
     logging.basicConfig( format="[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",  level=logging.DEBUG if args.verbose else logging.INFO, filename=args.logfile )
-    logging.info("Starting telgarm bot")
+    logging.info("Starting telegram bot")
 
     handler = HomeBotHandler( args.url )
     bot     = Bot( args.token, args.admins, handler )
 
     bot.loop_start()
     try:
-      while True:
-         time.sleep(1)
+      handler.mqttc.loop_forever()
     finally:
       handler.mqttc.loop_stop()
       bot.loop_stop()

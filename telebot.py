@@ -71,6 +71,8 @@ class Bot:
                else:
                  self.logger.error('Error while recieve updates from server')
                  self.logger.error(result)
+             except KeyboardInterrupt, ke:
+                return
              except BaseException, e:
                 self.logger.exception('Error while recieve updates from server')
                 time.sleep(30)
