@@ -140,7 +140,6 @@ class KHLBotHandler(BotRequestHandler):
        page = requests.get(url).text
        tree = lxml.html.fromstring( page )
        sel = lxml.cssselect.CSSSelector( u"h4:contains('КХЛ') + div > .list-group-item" )
-       #sel = lxml.cssselect.CSSSelector( u"h4 + div > .list-group-item" )
        return [ Game(element) for element in sel(tree) ]
 
 
@@ -165,7 +164,7 @@ class KHLBotHandler(BotRequestHandler):
           to_remove = [ x for x in self.games if x.id not in new_game_id ]
           for game in to_remove:
               self.logger.debug('Removing obsolete %s' % str(game) )
-              self.sheduler.stop(game)
+              self.scheduler.stop(game)
               self.games.remove( game )
 
 
