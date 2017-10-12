@@ -9,7 +9,65 @@ from telebot import Bot, BotRequestHandler
 import paho.mqtt.client as mqtt
 from cStringIO import StringIO
 import requests
+import cookielib
+from datetime import datetime
 import re
+import lxml.cssselect
+import lxml.html
+
+
+class NnmSearchHandler(BotRequestHandler):
+   def __init__(self):
+       self.logger = logging.getLogger(self.__class__.__name__)
+       pass
+
+   def do_search(self, query):
+       url = "http://nnm-club.name/forum/tracker.php"
+       r = requests.post(url, data={
+             'nm': query.encode('windows-1251'), 
+             'submit': (u'Поиск').encode('windows-1251'),
+       })
+       tree = lxml.html.fromstring( r.text )
+
+       sel = lxml.cssselect.CSSSelector(u"table.forumline.tablesorter tr.prow1,tr.prow2" )
+       results = []
+       for item in sel(tree):
+          results.append( self.parse_result(item) )
+       return results
+       pass
+
+   def parse_result(self, element):
+       cells = element.cssselect('td')
+       return {'title': cells[2].text_content().strip(), 
+               'link': 'http://nnm-club.name/forum/'+cells[2].cssselect('a')[0].attrib['href'],
+               'category': cells[1].text_content().strip(),
+               'size': int(cells[5].cssselect('u')[0].text_content().strip()),
+               'added': int(cells[9].cssselect('u')[0].text_content().strip())
+       }
+
+   def format_item(self, item):
+       message = u"<b>%s</b>\nРаздел: %s\nРазмер: %s\nДобавлено: %s\n%s" % (item['title'], item['category'], self.format_size(item['size']), self.format_time(item['added']), item['link'])
+       buttons = [ {'callback_data': '/download %s' % item['link'], 'text': 'Download' } ]
+       return { 'text': message, 'markup': { 'inline_keyboard': [ buttons ] }, 'extra': {'parse_mode':'html', 'disable_notification': True, 'disable_web_page_preview': False} }
+
+   def format_time(self, tm ):
+       return datetime.fromtimestamp(tm).strftime("%d.%m.%Y %H:%M")
+   
+   def format_size(self, size):
+       size=int(size)
+       if size>1024*1024*1024:
+          return "%.2f GB" % ( int(size) / (1024.0*1024*1024) )
+       if size>1024*1024:
+          return "%.2f MB" % ( int(size) / (1024.0*1024) )
+       if size>1024:
+          return "%.2f KB" % ( int(size) / (1024.0) )
+       return "%d B" % size
+
+   def cmd_nnm(self, *query):
+       results = self.do_search( " ".join(query) )
+       res = [ self.format_item(item) for item in results ]
+       return res if len(res)>0 else None
+
 
 
 class HomeBotHandler(BotRequestHandler):
@@ -99,6 +157,40 @@ class HomeBotHandler(BotRequestHandler):
    pass
 
 
+from download_helpers import DownloadHelper, NnmClubDownloadHelper
+
+class DownloadHandler(BotRequestHandler):
+   def __init__(self):
+       self.logger  = logging.getLogger(self.__class__.__name__)
+       self.helpers = [ NnmClubDownloadHelper('led_spb','fiwrqq') ]
+       self.proxy   = 'socks5://192.168.168.2:9050'
+       self.target_path = '/home/pi/Downloads'
+
+   def cmd_download(self, url):    
+       for helper in self.helpers:
+           if helper.check_url(url):
+              try:
+                 try:
+                    filename = helper.download( url, self.target_path )
+                    return {'text': 'Downloaded to %s' %filename }
+                 except Exception,e:
+                    if self.proxy==None:
+                       raise e
+
+                    logging.info("Trying to use tor proxy. Cause %s: %s" % ( e.__class__.__name__, str(e) ) )
+                    helper.session.proxies = { 'http': self.proxy, 'https': self.proxy }
+                    helper.isAuth=None
+                    helper.login()
+                    filename = helper.download( url, self.target_path )
+
+                    return {'text': 'Downloaded to %s' %filename }
+                 finally:
+                    helper.session.proxies = None
+              except Exception,e:
+                 raise e
+       return {'text': 'Url is unknown' %url }
+
+
 if __name__ == '__main__':
     logging.getLogger("requests").setLevel(logging.ERROR)
     logging.getLogger("urllib3").setLevel(logging.ERROR)
@@ -122,7 +214,11 @@ if __name__ == '__main__':
     logging.info("Starting telegram bot")
 
     handler = HomeBotHandler( args.url )
-    bot     = Bot( args.token, args.admins, handler )
+    bot     = Bot( args.token, args.admins )
+
+    bot.addHandler( handler )
+    bot.addHandler( NnmSearchHandler() )
+    bot.addHandler( DownloadHandler() )
 
     bot.loop_start()
     try:

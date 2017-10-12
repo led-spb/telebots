@@ -1,5 +1,6 @@
 import requests, logging, json, time
 import threading
+import traceback
 
 class BotRequestHandler:
 
@@ -23,16 +24,22 @@ class BotRequestHandler:
 
 
 class Bot:
-      def __init__(self, token, admins, handler, logger=None ):
+      def __init__(self, token, admins, handler=None, logger=None ):
           self.logger = logger or logging.getLogger(self.__class__.__name__)
 
           self.token  = token
           self.admins = admins
-
-          self.handler = handler
-          self.handler.assignTo(self)
+          self.handlers = []
+          if handler!=None:
+             self.addHandler(handler)
           self._thread_terminate = False
 
+      def addHandler(self,handler):
+          if handler!=None:
+             handler.assignTo(self)
+             self.handlers.append(handler)
+          pass
+        
 
       def request_loop(self):
           params = { 'timeout':60, 'offset': 0, 'limit': 5 }
@@ -40,11 +47,16 @@ class Bot:
              try:
                req = requests.post( 'https://api.telegram.org/bot%s/getUpdates' % self.token, params, timeout=60+5 )
                result = req.json()
-               self.logger.debug( 'got:'+json.dumps(result) )
+               self.logger.debug( 'updates:' )
+               self.logger.debug( json.dumps(result, indent=2) )
 
                if result['ok']:
                   updates = result['result']
                   for update in updates:
+                      if 'inline_query' in update:
+                         inline = update['inline_query']
+                         if 'from' in inline and inline['from']['id'] in self.admins:
+                             self.exec_inline( inline )
 
                       if 'callback_query' in update:
                          callback = update['callback_query']
@@ -55,7 +67,6 @@ class Bot:
                          message['from'] = callback['from']
                          message['text'] = callback['data']
                          update.update( {'message': message } )
-
 
 
                       if 'message' in update:
@@ -92,22 +103,33 @@ class Bot:
              self._thread = None
           pass
 
+      def exec_inline(self, message):
+          pass
+
       def exec_command(self, message):
-          params = message['text'].lower().split()
+          params  = message['text'].lower().split()
           command = params[0]
           ret = None
 
-          f = self.handler.getCommand(command)
-          if f:
-             try:
-               response = f.__call__(*params[1:])
-             except BaseException,e:
-               response = str(e)
+          for handler in self.handlers:
+            functor = handler.getCommand(command)
+            if functor:
+               try:
+                 response = functor.__call__(*params[1:])
+               except BaseException,e:
+                 response = traceback.format_exc()
 
-             self.__send_response( message['chat']['id'], response )
-             return
-  
-          cmds = self.handler.commands()
+               if response==None:
+                  return
+               if type(response)!=list:
+                  response = [response]
+               for item in response:
+                   self.__send_response( message['chat']['id'], item )
+               return
+
+          cmds = []
+          for x in self.handlers:
+              cmds = cmds + x.commands()
           msg = "Unknown command\n%s" % "\n".join(cmds)
           self.__send_response( message['chat']['id'], msg )
           pass
@@ -125,15 +147,17 @@ class Bot:
           pass
 
       def exec_event( self, event_name, *event_data ):
-          f = self.handler.getEvent(event_name)
-          if f:
-             try:
-               response = f.__call__( *event_data )
-             except BaseException,e:
-               response = str(e)
+          for handler in self.handlers:
+              functor = handler.getEvent(event_name)
+              if functor:
+                 try:
+                   response = functor.__call__( *event_data )
+                 except BaseException,e:
+                   response = str(e)
 
-             for to in self.admins:
-                 self.__send_response( to, response )
+                 for to in self.admins:
+                     self.__send_response( to, response )
+                 return
           pass
 
 

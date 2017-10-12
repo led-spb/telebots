@@ -82,7 +82,7 @@ class UpdateScheduler():
        self.games = []
        self.events = []
        self.handler = handler
-       handler.add_scheduler( self )
+       self.handler.add_scheduler( self )
 
    def add_game(self, game ):
        if game.id in self.games:
@@ -104,7 +104,7 @@ class UpdateScheduler():
        to_remove = []
        now = time.time()
 
-       handler.update_games_list()
+       self.handler.update_games_list()
        for id in self.games:
            game = handler.find_game(id)
 
@@ -216,10 +216,16 @@ class KHLBotHandler(BotRequestHandler):
 
    pass
 
-
 if __name__ == '__main__':
+    try:
+        from http.client import HTTPConnection # py3
+    except ImportError:
+        from httplib import HTTPConnection # py2
+    HTTPConnection.debuglevel = 0
+
     logging.getLogger("requests").setLevel(logging.ERROR)
     logging.getLogger("urllib3").setLevel(logging.ERROR)
+
 
     class LoadFromFile( argparse.Action ):
         def __call__(self, parser, namespace, values, option_string = None):
