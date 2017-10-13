@@ -164,7 +164,7 @@ class KHLBotHandler(BotRequestHandler):
           to_remove = [ x for x in self.games if x.id not in new_game_id ]
           for game in to_remove:
               self.logger.debug('Removing obsolete %s' % str(game) )
-              self.scheduler.stop(game)
+              self.scheduler.stop_game(game)
               self.games.remove( game )
 
 
