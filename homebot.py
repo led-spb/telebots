@@ -71,8 +71,12 @@ class NnmSearchHandler(BotRequestHandler):
 
 
 class HomeBotHandler(BotRequestHandler):
-   def __init__(self, mqtt_url ):
+   def __init__(self, mqtt_url, sensors=None, cameras=None ):
        self.logger = logging.getLogger(self.__class__.__name__)
+       self.sensors = sensors or []
+       self.cameras = cameras or []
+       self.event_gap = 300
+       self.events = {}
 
        host = mqtt_url.hostname
        port = mqtt_url.port if mqtt_url!=None else 1883
@@ -93,14 +97,18 @@ class HomeBotHandler(BotRequestHandler):
    def _on_connect( self, client, obj, flags, rc ):
        self.logger.info("MQTT broker: %s", mqtt.connack_string(rc) )
        if rc==0:
-          self.mqttc.subscribe("/home/alarm/#")
+          topics = ["/home/sensor/%s" % x for x in self.sensors ] + ["/home/camera/%s/#" % x for x in self.cameras]
+          for topic in topics:
+              self.logger.debug("Subscribe for topic %s" % topic)
+              self.mqttc.subscribe( topic )
        pass
 
    def _on_message( self, mosq, obj, msg ):
        if msg.retain:
           return
+
        self.logger.info("topic %s, payload: %s" % (msg.topic, "[binary]" if len(msg.payload)>10 else msg.payload) )
-       path = msg.topic.split('/')[3:]
+       path = msg.topic.split('/')[2:]
        event = path[0]
        self.bot.exec_event( event, path[1:], msg.payload )
        pass
@@ -150,25 +158,26 @@ class HomeBotHandler(BotRequestHandler):
    def event_sensor(self, path, payload ):
        sensor = path[0]
        value = payload
-       if sensor=='door':
-          if int(value)>0:
-             return "%s: alert %s" % ( sensor, time.strftime("%d.%m %H:%M") )
+       now = time.time()
+
+       if int(value)>0 and (sensor not in self.events or (now-self.events[sensor])>self.event_gap):
+          self.events[sensor] = now
+          return "%s: alert %s" % ( sensor, time.strftime("%d.%m %H:%M") )
        return None
    pass
 
 
-from download_helpers import DownloadHelper, NnmClubDownloadHelper
 
 class DownloadHandler(BotRequestHandler):
-   def __init__(self):
+   def __init__(self, helpers=[], target=".", proxy=None):
        self.logger  = logging.getLogger(self.__class__.__name__)
-       self.helpers = [ NnmClubDownloadHelper('led_spb','fiwrqq') ]
-       self.proxy   = 'socks5://192.168.168.2:9050'
-       self.target_path = '/home/pi/Downloads'
+       self.helpers = helpers
+       self.proxy   = proxy
+       self.target_path = target
 
    def cmd_download(self, url):    
        for helper in self.helpers:
-           if helper.check_url(url):
+           if helper.__class__.check_url(url):
               try:
                  try:
                     filename = helper.download( url, self.target_path )
@@ -188,10 +197,12 @@ class DownloadHandler(BotRequestHandler):
                     helper.session.proxies = None
               except Exception,e:
                  raise e
-       return {'text': 'Url is unknown' %url }
+       return {'text': 'Url "%s" is unknown' %url }
 
 
 if __name__ == '__main__':
+    import download_helpers
+
     logging.getLogger("requests").setLevel(logging.ERROR)
     logging.getLogger("urllib3").setLevel(logging.ERROR)
 
@@ -200,25 +211,49 @@ if __name__ == '__main__':
            with values as f:
                parser.parse_args(f.read().split(), namespace)
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument( "-c", "--config", type=open, action=LoadFromFile, help="Load config from file" )
-    parser.add_argument( "-u","--url", default="localhost:1883", type=urlparse.urlparse, help="MQTT Broker address host:port"  )
-    parser.add_argument( "--token",   help="Telegram API bot token" )
-    parser.add_argument( "--admin",   nargs="+", help="Bot admin", type=int, dest="admins" )
-    parser.add_argument( "-v", action="store_true", default=False, help="Verbose logging", dest="verbose" )
-    parser.add_argument( "--logfile", help="Logging into file" )
+    parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
+
+    basic = parser.add_argument_group('basic','Basic parameters')
+    basic.add_argument( "-c", "--config", type=open, action=LoadFromFile, help="Load config from file" )
+    basic.add_argument( "-u","--url", default="localhost:1883", type=urlparse.urlparse, help="MQTT Broker address host:port"  )
+    basic.add_argument( "--token",   help="Telegram API bot token" )
+    basic.add_argument( "--admin",   nargs="+", help="Bot admin", type=int, dest="admins" )
+    basic.add_argument( "--logfile", help="Logging into file" )
+    basic.add_argument( "-v", action="store_true", default=False, help="Verbose logging", dest="verbose" )
+
+    status = parser.add_argument_group('status', 'Home state parameters')
+    status.add_argument( "--sensors", nargs="*", help="Notify state of this sensors", type=str)
+    status.add_argument( "--cameras", nargs="*", help="Notify state of this camera", type=str)
+
+    download = parser.add_argument_group('download', 'Download helper parameters')
+    download.add_argument( "--helper",  nargs="*" )
+    download.add_argument( "--download-dir", dest="download_dir", default="." )
+    download.add_argument( "--proxy" )
+
     args = parser.parse_args()
 
     # configure logging
     logging.basicConfig( format="[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",  level=logging.DEBUG if args.verbose else logging.INFO, filename=args.logfile )
     logging.info("Starting telegram bot")
 
-    handler = HomeBotHandler( args.url )
+    handler = HomeBotHandler( args.url, sensors=args.sensors, cameras=args.cameras )
     bot     = Bot( args.token, args.admins )
 
+    # Default handler
     bot.addHandler( handler )
+
+    # Torrent search handler
     bot.addHandler( NnmSearchHandler() )
-    bot.addHandler( DownloadHandler() )
+
+    # Torrent download handler
+    helpers = []
+    for url in args.helper:
+        helper = download_helpers.create_helper(url)
+        if helper!=None:
+           helpers.append(helper)
+        else:
+           logging.warn( "%s is unknown helper", url)
+    bot.addHandler( DownloadHandler(helpers=helpers, target=args.download_dir, proxy=args.proxy) )
 
     bot.loop_start()
     try:

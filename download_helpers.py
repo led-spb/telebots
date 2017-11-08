@@ -3,16 +3,29 @@ import re, os.path
 import requests, cookielib
 import json, bencode
 import logging
+import urlparse
+
+def create_helper(url):
+    p = urlparse.urlparse(url)
+    baseurl = "%s://%s/" % (p[0],p.hostname)
+    username = p.username
+    password = p.password
+
+    for cls in DownloadHelper.__subclasses__():
+        if cls.check_url(baseurl):
+            return cls(username, password)
+    return None
+
 
 class DownloadHelper(object):
   timeout = 10
   torrent_path = "."
+  base_url = ""
   cookies = cookielib.CookieJar()
 
-  def __init__(self, base_url, user, passwd):
+  def __init__(self, user, passwd):
       self.user     = user
       self.passwd   = passwd
-      self.base_url = base_url
       #self.timeout  = timeout
 
       self.session = requests.Session()
@@ -22,18 +35,19 @@ class DownloadHelper(object):
             'Accept-Charset': 'utf-8'
       }
 
-  def check_url(self, url):
-     return re.search("^%s" % self.base_url, url) != None
+  @classmethod
+  def check_url(cls, url):
+     return re.search("^%s" % cls.base_url, url) != None
 
   def download(self, url, target_path=None ):
      return None
 
 
 class NnmClubDownloadHelper(DownloadHelper):
-  name   = "Noname club"
+  base_url   = "http://nnm-club.name"
 
   def __init__(self, user, passwd ):
-      DownloadHelper.__init__(self, 'http://nnm-club.name', user, passwd )
+      DownloadHelper.__init__(self, user, passwd )
       self.isAuth = None
       pass
 
