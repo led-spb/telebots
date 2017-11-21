@@ -64,6 +64,8 @@ class NnmSearchHandler(BotRequestHandler):
        return "%d B" % size
 
    def cmd_nnm(self, *query):
+       if len(query)==0:
+          return { 'text': 'Empty query' }
        results = self.do_search( " ".join(query) )
        res = [ self.format_item(item) for item in results ]
        return res if len(res)>0 else None
@@ -97,7 +99,7 @@ class HomeBotHandler(BotRequestHandler):
    def _on_connect( self, client, obj, flags, rc ):
        self.logger.info("MQTT broker: %s", mqtt.connack_string(rc) )
        if rc==0:
-          topics = ["/home/sensor/%s" % x for x in self.sensors ] + ["/home/camera/%s/#" % x for x in self.cameras]
+          topics = ["/home/notify"] + ["/home/sensor/%s" % x for x in self.sensors ] + ["/home/camera/%s/#" % x for x in self.cameras]
           for topic in topics:
               self.logger.debug("Subscribe for topic %s" % topic)
               self.mqttc.subscribe( topic )
@@ -110,6 +112,7 @@ class HomeBotHandler(BotRequestHandler):
        self.logger.info("topic %s, payload: %s" % (msg.topic, "[binary]" if len(msg.payload)>10 else msg.payload) )
        path = msg.topic.split('/')[2:]
        event = path[0]
+       self.logger.debug("Event %s path: %s" % (event, repr(path[1:])) )
        self.bot.exec_event( event, path[1:], msg.payload )
        pass
 
@@ -124,6 +127,9 @@ class HomeBotHandler(BotRequestHandler):
           self.subscribe = False
        return None
 
+   def cmd_stat(self, *args):
+       template = '{% for item in states.sensor %}{% if item.state!=\'unknown\' %}{{ item.name }} is {{item.state_with_unit}}\n{% endif %}{% endfor %}'
+       return requests.post('http://127.0.0.1:8123/api/template', data=json.dumps({'template': template}) ).text
 
    def cmd_video(self, video=None):
        if video is None:
