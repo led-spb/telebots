@@ -103,6 +103,10 @@ class Bot:
              self._thread = None
           pass
 
+      def loop_forever(self):
+          self.request_loop()
+          pass
+
       def exec_inline(self, message):
           pass
 
@@ -115,7 +119,10 @@ class Bot:
             functor = handler.getCommand(command)
             if functor:
                try:
-                 response = functor.__call__(*params[1:])
+                 if 'full_message' in functor.func_code.co_varnames:
+                    response = functor.__call__( full_message = message['text'] )
+                 else:
+                    response = functor.__call__(*params[1:])
                except BaseException,e:
                  response = traceback.format_exc()
 
