@@ -4,8 +4,9 @@ import requests, cookielib
 import json, bencode
 import logging
 import urlparse
+import youtube_dl
 
-def create_helper(url):
+def create_helper(url, proxy):
     p = urlparse.urlparse(url)
     baseurl = "%s://%s/" % (p[0],p.hostname)
     username = p.username
@@ -13,7 +14,7 @@ def create_helper(url):
 
     for cls in DownloadHelper.__subclasses__():
         if cls.check_url(baseurl):
-            return cls(username, password)
+            return cls(username, password, proxy)
     return None
 
 
@@ -23,10 +24,9 @@ class DownloadHelper(object):
   base_url = ""
   cookies = cookielib.CookieJar()
 
-  def __init__(self, user, passwd):
+  def __init__(self, user, passwd, proxy):
       self.user     = user
       self.passwd   = passwd
-      #self.timeout  = timeout
 
       self.session = requests.Session()
       self.session.cookies = DownloadHelper.cookies
@@ -44,23 +44,25 @@ class DownloadHelper(object):
 
 
 class NnmClubDownloadHelper(DownloadHelper):
-  base_url   = "http://nnm-club.name"
+  base_url   = "https?://(nnm-club\.(name|me|to|tv|lib))|(nnmclub\.to)"
 
-  def __init__(self, user, passwd ):
-      DownloadHelper.__init__(self, user, passwd )
+  def __init__(self, user, passwd, proxy ):
+      DownloadHelper.__init__(self, user, passwd, proxy )
+      self.session.proxies = {'http_proxy': proxy, 'htts_proxy': proxy }
       self.isAuth = None
+      self.base_path = None
       pass
 
   def check_auth( self, req):
-      logging.debug(req.text)
+      #logging.debug(req.text)
       status = True if re.search( '<a\s+href="login.php\?logout', req.text, re.I+re.M )!=None else False
       logging.info("Noname-club auth status %s", "ok" if status else "fail" )
       return status
   
-  def login(self ):
+  def login(self):
       if self.isAuth:
          return
-      url = '%s/forum/login.php' % self.base_url
+      url = '%s/forum/login.php' % self.base_path
       logging.info("Trying to login")
 
       req = self.session.get( url )
@@ -84,10 +86,17 @@ class NnmClubDownloadHelper(DownloadHelper):
       pass
 
   def download(self, url, target_path=None ):
+      m = re.search('^https?://[^/]+', url)
+      if m==None:
+         raise Exception('Invalid URL: "%s"' % url )
+      self.base_path = m.group(0)
+
       if self.isAuth==None:
-         self.isAuth = self.check_auth( self.session.get('%s/forum/index.php' % self.base_url) )
+         self.isAuth = self.check_auth( self.session.get('%s/forum/index.php' % self.base_path) )
+
       if not self.isAuth:
          self.login()
+
       m = re.search("viewtopic.php\\?(?:t|p)=(\\d+)", url)
       torrent = m.group(1)
 
@@ -108,7 +117,7 @@ class NnmClubDownloadHelper(DownloadHelper):
          raise Exception("Could not find download id")
 
       # download
-      url = "%s/forum/download.php?id=%s" % (self.base_url, torrent_id )
+      url = "%s/forum/download.php?id=%s" % (self.base_path, torrent_id )
       req = self.session.get( url )
       req.raise_for_status()
 
@@ -119,3 +128,13 @@ class NnmClubDownloadHelper(DownloadHelper):
       f.close()
       req.close()
       return filename
+
+
+class YoutubeDownloadHelper(DownloadHelper):
+   base_url = 'https?://(www\.youtube\.com|youtu\.be)'
+
+   def download(self, url, target_path=None ):
+       ydl_opts = { 'outtmpl': os.path.join(target_path,'%(title)s.%(ext)s') }
+       with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+          ydl.download([url])
+       return target_path
