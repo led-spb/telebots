@@ -247,6 +247,7 @@ class YoutubeHelper(DownloadHelper):
    def download(self, url, target_path=None ):
        ydl_opts = { 'outtmpl': unicode(os.path.join(target_path,'%(title)s.%(ext)s')) }
        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-          ydl.download([url])
-       return target_path
+          res = ydl.extract_info( url )
+          filename = ydl.prepare_filename( res )
+          return filename
       

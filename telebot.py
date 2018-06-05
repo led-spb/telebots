@@ -80,8 +80,8 @@ class Bot:
                             message['text'] = callback['data']
                             update.update({'message': message})
 
-                            if 'message' in update:
-                                message = update['message']
+                        if 'message' in update:
+                            message = update['message']
 
                             if 'from' in message and 'text' in message:
                                 user = message['from']
@@ -93,6 +93,8 @@ class Bot:
                                         message['from']['first_name']
                                     )
                                     self.exec_command(message)
+                            else:
+                                self.logger.warn("Unauthorized request from %s", json.dumps(user) )
 
                         params['offset'] = update['update_id']+1
                 else:
@@ -133,6 +135,7 @@ class Bot:
     def exec_command(self, message):
         params = message['text'].lower().split()
         command = params[0]
+        self.logger.debug('Processing command %s (%s)', command, ", ".join(params[1:]) )
         ret = None
 
         for handler in self.handlers:
@@ -146,7 +149,7 @@ class Bot:
                 except BaseException, e:
                     resp = traceback.format_exc()
 
-                if response is None:
+                if resp is None:
                     return
                 if type(resp) != list:
                     resp = [resp]
@@ -158,6 +161,7 @@ class Bot:
         for x in self.handlers:
             cmds = cmds + x.commands()
         msg = "Unknown command\n%s" % "\n".join(cmds)
+        self.logger.debug( msg )
         self.__send_response(message['chat']['id'], msg)
         pass
 
@@ -167,7 +171,7 @@ class Bot:
 
         if type(response) == dict:
             self.send_message(to, **response)
-        elif type(response) = =file:
+        elif type(response) == file:
             self.send_message(to, document=response)
         else:
             self.send_message(to, text=response)
@@ -223,7 +227,7 @@ class Bot:
 
         try:
             req = requests.post(
-                self.baseUrl + '/send%s' % (self.token, method),
+                self.baseUrl + '/send%s' % (method),
                 params, files=files, timeout=4
             )
             result = req.json()

@@ -4,7 +4,6 @@
 import os
 import os.path
 import logging
-import sys
 import argparse
 import time
 import json
@@ -13,7 +12,6 @@ from telebot import Bot, BotRequestHandler
 import paho.mqtt.client as mqtt
 from cStringIO import StringIO
 import requests
-from datetime import datetime
 import re
 
 
