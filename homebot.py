@@ -84,6 +84,11 @@ class HomeBotHandler(BotRequestHandler):
         return requests.post('http://127.0.0.1:8123/api/template',
                              data=json.dumps({'template': template})).text
 
+    def cmd_door(self, *args):
+        template = 'Door is {{ \'closed\' if states.binary_sensor.door.state == \'off\' else \'open\' }} for {{ relative_time(states.binary_sensor.door.last_changed) }} ({{ as_timestamp(states.binary_sensor.door.last_changed) | timestamp_custom() }})'
+        return requests.post('http://127.0.0.1:8123/api/template',
+                             data=json.dumps({'template': template})).text
+
     def cmd_video(self, video=None):
         if video is None:
             files = sorted([x for x in os.listdir('/home/hub/motion')
