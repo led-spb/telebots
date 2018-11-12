@@ -27,7 +27,7 @@ class BotRequestHandler:
 
 
 class Bot:
-    def __init__(self, token, admins, handler=None, logger=None):
+    def __init__(self, token, admins, handler=None, logger=None, proxy=None):
         self.logger = logger or logging.getLogger(self.__class__.__name__)
 
         self.token = token
@@ -37,6 +37,9 @@ class Bot:
         if handler is not None:
             self.addHandler(handler)
         self._thread_terminate = False
+        self.session = requests.Session()
+        if proxy!=None:
+            self.session.proxies = { 'https': proxy }
 
     def addHandler(self, handler):
         if handler is not None:
@@ -48,7 +51,7 @@ class Bot:
         params = {'timeout': 60, 'offset': 0, 'limit': 5}
         while not self._thread_terminate:
             try:
-                req = requests.post(
+                req = self.session.post(
                     self.baseUrl+'/getUpdates',
                     params,
                     timeout=60+5
@@ -70,7 +73,7 @@ class Bot:
                             callback = update['callback_query']
 
                             # answer to callback
-                            requests.post(
+                            self.session.post(
                                 self.baseUrl + '/answerCallbackQuery',
                                 {'callback_query_id': callback['id']}
                             )
@@ -226,7 +229,7 @@ class Bot:
                 params[key] = val
 
         try:
-            req = requests.post(
+            req = self.session.post(
                 self.baseUrl + '/send%s' % (method),
                 params, files=files, timeout=4
             )

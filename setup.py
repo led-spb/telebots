@@ -20,6 +20,7 @@ setuptools.setup(
     ],
     install_requires=[
        'requests>=2.10.0',
+       'pysocks',
        'paho_mqtt',
 #       'lxml>=2.0',
 #       'cssselect',

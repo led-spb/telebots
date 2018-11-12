@@ -186,6 +186,7 @@ def main():
     basic.add_argument("--token", help="Telegram API bot token")
     basic.add_argument("--admin", nargs="+", help="Bot admin",
                        type=int, dest="admins")
+    basic.add_argument("--proxy")
     basic.add_argument("--logfile", help="Logging into file")
     basic.add_argument("-v", action="store_true",
                        default=False, help="Verbose logging", dest="verbose")
@@ -211,7 +212,7 @@ def main():
         sensors=args.sensors,
         cameras=args.cameras
     )
-    bot = Bot(args.token, args.admins)
+    bot = Bot(args.token, args.admins, proxy=args.proxy)
 
     # Default handler
     bot.addHandler(handler)
