@@ -43,9 +43,9 @@ class HomeBotHandler(BotRequestHandler):
     def _on_connect(self, client, obj, flags, rc):
         self.logger.info("MQTT broker: %s", mqtt.connack_string(rc))
         if rc == 0:
-            topics = ["/home/notify"] + \
-                     ["/home/sensor/%s" % x for x in self.sensors] + \
-                     ["/home/camera/%s/#" % x for x in self.cameras]
+            topics = ["home/notify"] + \
+                     ["home/sensor/%s" % x for x in self.sensors] + \
+                     ["home/camera/%s/#" % x for x in self.cameras]
             for topic in topics:
                 self.logger.debug("Subscribe for topic %s" % topic)
                 self.mqttc.subscribe(topic)
@@ -59,7 +59,7 @@ class HomeBotHandler(BotRequestHandler):
             msg.topic,
             "[binary]" if len(msg.payload) > 10 else msg.payload
         ))
-        path = msg.topic.split('/')[2:]
+        path = msg.topic.split('/')[1:]
         event = path[0]
         self.logger.debug("Event %s path: %s" % (event, repr(path[1:])))
         self.bot.exec_event(event, path[1:], msg.payload)

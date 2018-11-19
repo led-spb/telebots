@@ -22,12 +22,17 @@ setuptools.setup(
        'requests>=2.10.0',
        'pysocks',
        'paho_mqtt',
+       'tornado',
+       'jinja2',
+       'gpxpy',
+       'humanize',
 #       'lxml>=2.0',
 #       'cssselect',
 #       'pyyaml>3.10',
     ],
     entry_points={
        'console_scripts': [
+            'carbot = telebots.carbot:main',
             'homebot = telebots.homebot:main',
             'torrentbot = telebots.torrentbot:main',
             'khlbot = telebots.khlbot:main',

@@ -47,14 +47,52 @@ class Bot:
             self.handlers.append(handler)
         pass
 
+    def process_callback(self, callback):
+        self.session.post(
+            self.baseUrl + '/answerCallbackQuery',
+            {'callback_query_id': callback['id']}
+        )
+        pass
+
+    def process_updates(self, updates):
+        for update in updates:
+            if 'callback_query' in update:
+                callback = update['callback_query']
+                self.process_callback( callback )
+                # answer to callback
+
+                message = callback['message']
+                message['from'] = callback['from']
+                message['text'] = callback['data']
+                update.update({'message': message})
+
+            if 'message' in update:
+                message = update['message']
+
+                if 'from' in message and 'text' in message:
+                    user = message['from']
+                    if user['id'] in self.admins:
+                        self.logger.info(
+                            "request \"%s\" from %d/%s",
+                            message['text'],
+                            message['from']['id'],
+                            message['from']['first_name']
+                        )
+                        self.exec_command( message )
+                else:
+                    self.logger.warn("Unauthorized request from %s", json.dumps(user) )
+
+            self.params['offset'] = update['update_id']+1
+        return
+
     def request_loop(self):
-        params = {'timeout': 60, 'offset': 0, 'limit': 5}
+        self.params = {'timeout': 60, 'offset': 0, 'limit': 5}
         while not self._thread_terminate:
             try:
                 req = self.session.post(
                     self.baseUrl+'/getUpdates',
-                    params,
-                    timeout=60+5
+                    self.params,
+                    timeout= self.params['timeout']+5
                 )
                 result = req.json()
                 self.logger.debug('updates:')
@@ -62,44 +100,7 @@ class Bot:
 
                 if result['ok']:
                     updates = result['result']
-                    for update in updates:
-                        if 'inline_query' in update:
-                            inline = update['inline_query']
-                            if 'from' in inline and \
-                               inline['from']['id'] in self.admins:
-                                self.exec_inline(inline)
-
-                        if 'callback_query' in update:
-                            callback = update['callback_query']
-
-                            # answer to callback
-                            self.session.post(
-                                self.baseUrl + '/answerCallbackQuery',
-                                {'callback_query_id': callback['id']}
-                            )
-
-                            message = callback['message']
-                            message['from'] = callback['from']
-                            message['text'] = callback['data']
-                            update.update({'message': message})
-
-                        if 'message' in update:
-                            message = update['message']
-
-                            if 'from' in message and 'text' in message:
-                                user = message['from']
-                                if user['id'] in self.admins:
-                                    self.logger.info(
-                                        "request \"%s\" from %d/%s",
-                                        message['text'],
-                                        message['from']['id'],
-                                        message['from']['first_name']
-                                    )
-                                    self.exec_command(message)
-                            else:
-                                self.logger.warn("Unauthorized request from %s", json.dumps(user) )
-
-                        params['offset'] = update['update_id']+1
+                    self.process_updates(updates)
                 else:
                     self.logger.error(
                         'Error while recieve updates from server'
@@ -193,10 +194,28 @@ class Bot:
                 return
         pass
 
+    def send_message_admins( self, **kwargs ):
+        for to_chat_id in self.admins:
+            self.send_message( to_chat_id, **kwargs )
+        return
+
+    def send_request( self, url, method='GET', body=None, files={}, timeout=15 ):
+        if method=='GET' and body is None:
+           req = self.session.get( url, timeout=timeout )
+        else:
+           req = self.session.post( url, body, files=files, timeout=timeout )
+        result = req.json()
+        self.logger.debug('Response: ' + json.dumps(result))
+        if result['ok']:
+            return
+        self.logger.error('Error while send message')
+        self.logger.error(result)
+        return
+
     def send_message(
             self, to, text=None, photo=None, video=None,
-            audio=None, voice=None, document=None, markup=None,
-            reply_to_id=None, extra=None):
+            audio=None, voice=None, document=None, markup=None, 
+	    latitude=None, longitude=None, reply_to_id=None, extra=None):
         params = {'chat_id': to}
         files = {}
 
@@ -215,6 +234,10 @@ class Bot:
         elif document is not None:
             method = 'Document'
             files['document'] = document
+        elif latitude is not None:
+            method = 'Location'
+            params['latitude']  = latitude
+            params['longitude'] = longitude
         else:
             method = 'Message'
             params['text'] = text
@@ -229,16 +252,9 @@ class Bot:
                 params[key] = val
 
         try:
-            req = self.session.post(
-                self.baseUrl + '/send%s' % (method),
-                params, files=files, timeout=4
+            self.send_request( self.baseUrl + '/send%s' % (method),
+               method = 'POST', body=params, files=files, timeout=10
             )
-            result = req.json()
-            self.logger.debug('Response: ' + json.dumps(result))
-            if result['ok']:
-                return
-            self.logger.error('Error while send message')
-            self.logger.error(result)
         except BaseException, e:
             self.logger.exception('Error while send message')
         pass
