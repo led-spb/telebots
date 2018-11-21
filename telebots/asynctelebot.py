@@ -67,9 +67,9 @@ class AsyncBot(Bot):
     def process_callback(self, callback):
         client = AsyncHTTPClient()
         request = HTTPRequest(
-            self.baseUrl + '/answerCallbackQuery?callback_query_id=%d' % callback['id']
+            self.baseUrl + '/answerCallbackQuery?callback_query_id=%s' % callback['id']
         )
-        client.fetch(request, callback = self._on_message_cb, rase_error=False)
+        client.fetch(request, callback = self._on_message_cb, raise_error=False)
         pass
 
     @gen.coroutine
@@ -77,10 +77,11 @@ class AsyncBot(Bot):
         boundary_bytes = boundary.encode()
 
         for key, value in body.iteritems():
+            self.logger.debug("BODY: %s: %s", key, value)
             buf = ( 
                    ( b'--%s\r\n' % (boundary_bytes,)) 
                    + ( b'Content-Disposition: form-data; name="%s"\r\n' % key.encode() )
-                   + ( b'\r\n%s\r\n' % value.encode() )
+                   + ( b'\r\n%s\r\n' % str(value).encode() )
               )
             yield write(buf)
 
@@ -88,6 +89,7 @@ class AsyncBot(Bot):
             filename = value[0]
             f = value[1]
             mtype = value[2]
+            self.logger.debug("FILE: %s: %s %s", key, filename, mtype)
 
             buf = (
                   (b"--%s\r\n" % boundary_bytes)
@@ -112,14 +114,14 @@ class AsyncBot(Bot):
 
     def send_request( self, url, method='GET', body=None, files={}, timeout=15 ):
         client = AsyncHTTPClient()
-        if False or len(files)==0:
+        if len(files)==0:
             request = HTTPRequest( url, 
                 headers = { "Content-Type": "application/json" },
                 method = 'POST', body = json.dumps(body), request_timeout=timeout
             )
         else:
             boundary = uuid4().hex
-            producer = self.multipart_producer( boundary, body, files )
+            #producer = self.multipart_producer( boundary, body, files )
             request = HTTPRequest( url, 
                 headers = {"Content-Type": "multipart/form-data; boundary=%s" % boundary},
                 method = 'POST', 

@@ -13,11 +13,16 @@ import paho.mqtt.client as mqtt
 from cStringIO import StringIO
 import requests
 import re
+from asyncmqtt import TornadoMqttClient
+from tornado.ioloop import IOLoop, PeriodicCallback
+from telebot import BotRequestHandler
+from asynctelebot import AsyncBot
 
 
-class HomeBotHandler(BotRequestHandler):
-    def __init__(self, mqtt_url, sensors=None, cameras=None):
-        self.logger = logging.getLogger(self.__class__.__name__)
+class HomeBotHandler(BotRequestHandler, TornadoMqttClient):
+    def __init__(self, ioloop, mqtt_url, sensors=None, cameras=None):
+        self.logger  = logging.getLogger(self.__class__.__name__)
+        self.ioloop  = ioloop
         self.sensors = sensors or []
         self.cameras = cameras or []
         self.event_gap = 300
@@ -29,18 +34,25 @@ class HomeBotHandler(BotRequestHandler):
         self.logger.info("Trying connect to MQTT broker at %s:%d" %
                          (host, port))
 
-        self.mqttc = mqtt.Client()
-        if mqtt_url.username is not None:
-            self.mqttc.username_pw_set(mqtt_url.username, mqtt_url.password)
-
-        self.mqttc.on_connect = self._on_connect
-        self.mqttc.on_message = self._on_message
-        self.mqttc.connect(host, port, 60)
-        # self.mqttc.loop_start()
         self.subscribe = False
+        TornadoMqttClient.__init__(self, 
+             ioloop = ioloop,
+             host = mqtt_url.hostname, 
+             port = mqtt_url.port if mqtt_url.port!=None else 1883,
+             username = mqtt_url.username,
+             password = mqtt_url.password
+        )
+        #self.mqttc = mqtt.Client()
+        #if mqtt_url.username is not None:
+        #    self.mqttc.username_pw_set(mqtt_url.username, mqtt_url.password)
+
+        #self.mqttc.on_connect = self._on_connect
+        #self.mqttc.on_message = self._on_message
+        #self.mqttc.connect(host, port, 60)
+        # self.mqttc.loop_start()
         pass
 
-    def _on_connect(self, client, obj, flags, rc):
+    def on_mqtt_connect(self, client, obj, flags, rc):
         self.logger.info("MQTT broker: %s", mqtt.connack_string(rc))
         if rc == 0:
             topics = ["home/notify"] + \
@@ -48,10 +60,10 @@ class HomeBotHandler(BotRequestHandler):
                      ["home/camera/%s/#" % x for x in self.cameras]
             for topic in topics:
                 self.logger.debug("Subscribe for topic %s" % topic)
-                self.mqttc.subscribe(topic)
+                client.subscribe(topic)
         pass
 
-    def _on_message(self, mosq, obj, msg):
+    def on_mqtt_message(self, client, obj, msg):
         if msg.retain:
             return
 
@@ -206,23 +218,26 @@ def main():
         filename=args.logfile
     )
     logging.info("Starting telegram bot")
+    ioloop = IOLoop.instance()
 
     handler = HomeBotHandler(
+        ioloop,
         args.url,
         sensors=args.sensors,
         cameras=args.cameras
     )
-    bot = Bot(args.token, args.admins, proxy=args.proxy)
-
+    bot = AsyncBot(args.token, args.admins, proxy=args.proxy, ioloop=ioloop)
     # Default handler
     bot.addHandler(handler)
-
     bot.loop_start()
+    handler.start()
     try:
-        handler.mqttc.loop_forever()
+       ioloop.start()
+    except KeyboardInterrupt, e:
+       ioloop.stop()
     finally:
-        handler.mqttc.loop_stop()
-        bot.loop_stop()
+       pass
+    pass
 
 
 if __name__ == '__main__':
