@@ -116,9 +116,10 @@ signal: {{info.location.src}} {{info.location.sat}}
         self.logger.info("Storing track to %s", filename)
 
         gpx = self.track2gpx( payload["track"] )
-        with open( filename, "wb" ):
-            write( gpx.to_xml() )
-            close()
+        f = open( filename, "wb" )
+        f.write( gpx.to_xml() )
+        f.close()
+        pass    
 
     def on_location(self, device, event_time, payload):
         self.logger.info( "Location for %s received", device )

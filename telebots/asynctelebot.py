@@ -117,7 +117,7 @@ class AsyncBot(Bot):
         if len(files)==0:
             request = HTTPRequest( url, 
                 headers = { "Content-Type": "application/json" },
-                method = 'POST', body = json.dumps(body), request_timeout=timeout
+                method = 'POST', body = json.dumps(body)#, request_timeout=timeout
             )
         else:
             boundary = uuid4().hex
@@ -128,8 +128,7 @@ class AsyncBot(Bot):
                 body_producer = partial( 
                     self.multipart_producer,
                     boundary, body, files
-                ),
-                request_timeout=timeout
+                )#, request_timeout=timeout
             )
         client.fetch( request, callback=self._on_message_cb, raise_error = False )
         return
