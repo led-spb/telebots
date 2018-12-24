@@ -26,6 +26,7 @@ setuptools.setup(
        'jinja2',
        'gpxpy',
        'humanize',
+       'python-telegram-bot'
 #       'lxml>=2.0',
 #       'cssselect',
 #       'pyyaml>3.10',

@@ -7,10 +7,11 @@ import datetime
 import zlib
 import gpxpy.gpx
 import gpxpy.geo
+from cStringIO import StringIO
 from asyncmqtt import TornadoMqttClient
+from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
-from telebot import BotRequestHandler
-from asynctelebot import AsyncBot
+from telebot import Bot, BotRequestHandler, authorized
 from jinja2 import Environment, Template
 import humanize
 from collections import defaultdict
@@ -48,6 +49,7 @@ class CarMonitor(TornadoMqttClient, BotRequestHandler):
 
     def activity_job(self):
         self.logger.debug("Activity check job started")
+        chat_id = self.bot.admins[0]
         try:
             for device in self.devices:
                  status = self.devices[device]['status']
@@ -58,16 +60,17 @@ class CarMonitor(TornadoMqttClient, BotRequestHandler):
                          if not prev_signal_lost:
                              msg = '<b>WARN</b> last message from %s is %s' % (device, self.human_date(status['location_date']))
                              self.logger.warn( msg )
-                             self.bot.send_message_admins( text = msg, extra={'parse_mode':'HTML'} )
-                             self.bot.send_message_admins( **self.cmd_info(device) )
-                             self.bot.send_message_admins( latitude=status['location'][0], longitude=status['location'][1] )
+
+                             self.bot.send_message(to=chat_id, text = msg, extra={'parse_mode':'HTML'} )
+                             self.cmd_info(device)
+                             self.bot.send_message(to=chat_id, latitude=status['location'][0], longitude=status['location'][1] )
                      else:
                          if prev_signal_lost:
                              msg = '<b>NORM</b> signal from %s is catched now' % device
                              self.logger.warn( msg )
-                             self.bot.send_message_admins( text = msg, extra={'parse_mode':'HTML'} )
-                             self.bot.send_message_admins( **self.cmd_info(device) )
-                             self.bot.send_message_admins( latitude=status['location'][0], longitude=status['location'][1] )
+                             self.bot.send_message(to=chat_id, text = msg, extra={'parse_mode':'HTML'} )
+                             self.cmd_info(device)
+                             self.bot.send_message(to=chat_id, latitude=status['location'][0], longitude=status['location'][1] )
                      status['lost']  = is_signal_lost
                  pass
         except:
@@ -76,12 +79,27 @@ class CarMonitor(TornadoMqttClient, BotRequestHandler):
         return
 
     def human_date(self, value):
-        return humanize.naturaltime( value )
+        return humanize.naturaltime(value)
 
-    def cmd_debug(self):
-        return json.dumps(self.devices, indent=2, sort_keys=True, default=json_serial)
+    @authorized
+    def cmd_debug(self, message=None):
+        chat_id = message['chat']['id'] if message is not None else self.bot.admins[0]
 
-    def cmd_info(self, device=None):
+        buffer = StringIO( json.dumps(self.devices, indent=2, sort_keys=True, default=json_serial) )
+        return self.bot.send_message( to=chat_id,
+            document=( 'debug.txt', buffer, 'text/plain'),
+            extra={ 'caption': 'debug info' }
+        )
+
+    @authorized
+    def cmd_info(self, message=None):
+        params = ()
+        chat_id = self.bot.admins[0]
+        if message is not None:
+            chat_id = message['chat']['id']
+            params = message['text'].split()
+        device = params[1] if len(params)>1 else None    
+
         template = self.jinja.from_string("""
 {% for device, info in devices.iteritems() %}
 <b>{{device}}</b>
@@ -94,13 +112,25 @@ signal: {{info.location.src}} {{info.location.sat}}
 
 {% endfor %}
 """)
-        devices = {name:data for name, data in self.devices.iteritems() if device is None or name==device}
-        return {'text': template.render(devices = devices), 'extra': {'parse_mode': 'HTML'}}
+        devices = { name:data for name, data in self.devices.iteritems() if device is None or name==device}
+        return self.bot.send_message(
+                   to=chat_id,
+                   text=template.render(devices=devices),
+                   extra={'parse_mode': 'HTML'}
+        )
 
-    def cmd_location(self):
-        return [ {"latitude": data['location']['lat'], "longitude":data['location']['lon']} 
-                      for device, data in self.devices.iteritems() 
-        ]
+    @authorized
+    def cmd_location(self, message=None):
+        chat_id = self.bot.admins[0]
+        if message is not None:
+            chat_id = message['chat']['id']
+
+        for device, data in self.devices.iteritems():
+             self.bot.send_message(
+                 to=chat_id,
+                 latitude=data['location']['lat'],
+                 longitude=data['location']['lon']
+             )
 
     def on_mqtt_connect(self, client, userdata, flags, rc):
         self.logger.info("MQTT broker connection result: %s", mqtt.connack_string(rc) )
@@ -123,6 +153,7 @@ signal: {{info.location.src}} {{info.location.sat}}
 
     def on_location(self, device, event_time, payload):
         self.logger.info( "Location for %s received", device )
+        chat_id = self.bot.admins[0]
 
         battery = payload['batt']
 
@@ -133,12 +164,12 @@ signal: {{info.location.src}} {{info.location.sat}}
             low_battery = True
             msg = '<b>WARN</b> %s has low battery (%d%%)' % (device, battery)
             self.logger.warn(msg)
-            self.bot.send_message_admins( text = msg, extra={'parse_mode':'HTML'} )
+            self.bot.send_message(to=chat_id, text = msg, extra={'parse_mode':'HTML'} )
         if battery >= self.low_battery[1] and low_battery:
             low_battery = False
             msg = '<b>NORM</b> %s has norm battery (%d%%)' % (device, battery)
             self.logger.info(msg)
-            self.bot.send_message_admins( text = msg, extra={'parse_mode':'HTML'} )
+            self.bot.send_message(to=chat_id, text = msg, extra={'parse_mode':'HTML'} )
 
         if last_charge != payload['charge']:
             msg = 'Igninion changed to %s' % ('ON' if payload['charge']>0 else 'OFF')
@@ -150,6 +181,9 @@ signal: {{info.location.src}} {{info.location.sat}}
         if 'location' in self.devices[device]['status']:
             last_location = self.devices[device]['status']['location']
             distance = gpxpy.geo.distance(last_location[0], last_location[1],None, payload['lat'],payload['lon'], None)
+
+        if distance>500:
+            self.cmd_location()
 
         self.devices[device]['status']['low_batt']      = low_battery
         self.devices[device]['status']['location_date'] = event_time
@@ -236,7 +270,7 @@ def main():
 
 
     ioloop = IOLoop.instance()
-    bot = AsyncBot(args.token, args.admins)
+    bot = Bot(args.token, args.admins)
 
     monitor = CarMonitor( ioloop, args.url, args.name )
     bot.addHandler(monitor)

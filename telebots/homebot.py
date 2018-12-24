@@ -11,12 +11,12 @@ import urlparse
 from telebot import Bot, BotRequestHandler
 import paho.mqtt.client as mqtt
 from cStringIO import StringIO
-import requests
 import re
+from telebot import Bot, BotRequestHandler, authorized
 from asyncmqtt import TornadoMqttClient
+from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
-from telebot import BotRequestHandler
-from asynctelebot import AsyncBot
+from tornado.httpclient import AsyncHTTPClient
 
 
 class HomeBotHandler(BotRequestHandler, TornadoMqttClient):
@@ -27,6 +27,7 @@ class HomeBotHandler(BotRequestHandler, TornadoMqttClient):
         self.cameras = cameras or []
         self.event_gap = 300
         self.events = {}
+        self.http_client = AsyncHTTPClient()
 
         host = mqtt_url.hostname
         port = mqtt_url.port if mqtt_url is not None else 1883
@@ -42,14 +43,6 @@ class HomeBotHandler(BotRequestHandler, TornadoMqttClient):
              username = mqtt_url.username,
              password = mqtt_url.password
         )
-        #self.mqttc = mqtt.Client()
-        #if mqtt_url.username is not None:
-        #    self.mqttc.username_pw_set(mqtt_url.username, mqtt_url.password)
-
-        #self.mqttc.on_connect = self._on_connect
-        #self.mqttc.on_message = self._on_message
-        #self.mqttc.connect(host, port, 60)
-        # self.mqttc.loop_start()
         pass
 
     def on_mqtt_connect(self, client, obj, flags, rc):
@@ -74,20 +67,33 @@ class HomeBotHandler(BotRequestHandler, TornadoMqttClient):
         path = msg.topic.split('/')[1:]
         event = path[0]
         self.logger.debug("Event %s path: %s" % (event, repr(path[1:])))
-        self.bot.exec_event(event, path[1:], msg.payload)
+
+        self.exec_event(event, path[1:], msg.payload)
         pass
 
-    def cmd_photo(self):
-        requests.get("http://127.0.0.1:8082/0/action/snapshot")
+    def exec_event(self, name, path, payload):
+        if hasattr(self, "event_"+name):
+            handler = getattr(self, "event_"+name)
+            handler(path, payload)
+        pass
+
+    @authorized
+    def cmd_photo(self, message=None):
+        self.http_client.fetch("http://127.0.0.1:8082/0/action/snapshot")
         return None
 
-    def cmd_sub(self, *args):
+    @authorized
+    def cmd_sub(self, message=None):
+        args = message['text'].split()
+
         if len(args) < 1 or args[0].lower() != 'off':
             self.subscribe = True
         else:
             self.subscribe = False
         return None
 
+    """
+    @authorized
     def cmd_stat(self, *args):
         template = '{% for item in states.sensor %}' \
                    '{% if item.state!=\'unknown\' %}' \
@@ -96,12 +102,18 @@ class HomeBotHandler(BotRequestHandler, TornadoMqttClient):
         return requests.post('http://127.0.0.1:8123/api/template',
                              data=json.dumps({'template': template})).text
 
+    @authorized
     def cmd_door(self, *args):
         template = 'Door is {{ \'closed\' if states.binary_sensor.door.state == \'off\' else \'open\' }} for {{ relative_time(states.binary_sensor.door.last_changed) }} ({{ as_timestamp(states.binary_sensor.door.last_changed) | timestamp_custom() }})'
         return requests.post('http://127.0.0.1:8123/api/template',
                              data=json.dumps({'template': template})).text
+    """
 
-    def cmd_video(self, video=None):
+    @authorized
+    def cmd_video(self, message=None):
+        params = message['text'].split()
+        video = params[1] if len(params)>1 else None
+
         if video is None:
             files = sorted([x for x in os.listdir('/home/hub/motion')
                             if re.match('\d{8}_\d{6}\.mp4', x)], reverse=True)
@@ -115,52 +127,59 @@ class HomeBotHandler(BotRequestHandler, TornadoMqttClient):
                     buttons[i*7:(i+1)*7] for i in range(len(buttons)/7+1)
                 ] if len(x) > 0
             ]
-            return {
-                'text': 'which video?',
-                'markup': {'inline_keyboard': keyboard}
-            }
+            return self.bot.send_message(
+                       to = message['chat']['id'],
+                       text='which video?',
+                       markup={'inline_keyboard': keyboard}
+            )
 
         caption = re.sub('^\d{8}_(\d{2})(\d{2}).*$', '\\1:\\2', video)
-        return {
-            'video': (
-                'video.mp4',
-                open('/home/hub/motion/'+video, 'rb'),
-                'video/mp4'
-            ),
-            'extra': {
-                'caption': caption
-            }
-        }
-
+        return self.bot.send_message(
+                   to = message['chat']['id'],
+                   video = ('video.mp4', open('/home/hub/motion/'+video, 'rb'), 'video/mp4'),
+                   extra = {'caption': caption}
+                   
+        )
+    
     def event_camera(self, path, payload):
         cam_no = path[0]
         event_type = path[1]
-
         if event_type == 'photo':
-            response = {
-                'photo': ('image.jpg', StringIO(payload), 'image/jpeg'),
-                'extra': {'caption': 'camera#%s' % cam_no}
-            }
+            markup = None
             if not self.subscribe:
-                response.update({
-                    'markup': {
+                markup= {
                         'inline_keyboard': [[{
                             'text': 'Subscribe',
                             'callback_data': '/sub'
                         }]]
-                    }
-                })
-            return response
+                }
+
+            for chat_id in self.bot.admins:
+                self.bot.send_message( 
+                   to=chat_id,
+                   photo=('image.jpg', StringIO(payload), 'image/jpeg'),
+                   extra={'caption': 'camera#%s' % cam_no},
+                   markup=markup
+                )
+            return None
 
         if event_type == 'videom' or \
            (self.subscribe and event_type == 'video'):
             self.subscribe = False
-            return {'video': ('video.mp4', StringIO(payload), 'video/mp4')}
-
-        return None
+            for chat_id in self.bot.admins:
+                self.bot.send_message(
+                   to=chat_id, video= ('video.mp4', StringIO(payload), 'video/mp4')
+                )
+        pass
+    
 
     def event_notify(self, path, payload):
-        return payload
+        self.logger.info("Event notify")
+        for admin in self.bot.admins:
+            self.bot.send_message(
+                to=admin, text=payload
+            );
+        pass
 
     def event_sensor(self, path, payload):
         sensor = path[0]
@@ -171,9 +190,11 @@ class HomeBotHandler(BotRequestHandler, TornadoMqttClient):
            (sensor not in self.events or
            (now-self.events[sensor]) > self.event_gap):
             self.events[sensor] = now
-            return "%s: alert %s" % (sensor, time.strftime("%d.%m %H:%M"))
-        return None
-    pass
+            for admin in self.bot:
+                self.bot.send_message(
+                   to=admin, text="%s: alert %s" % (sensor, time.strftime("%d.%m %H:%M"))
+                )
+        pass
 
 
 def main():
@@ -226,7 +247,7 @@ def main():
         sensors=args.sensors,
         cameras=args.cameras
     )
-    bot = AsyncBot(args.token, args.admins, proxy=args.proxy, ioloop=ioloop)
+    bot = Bot(args.token, args.admins, proxy=args.proxy, ioloop=ioloop)
     # Default handler
     bot.addHandler(handler)
     bot.loop_start()

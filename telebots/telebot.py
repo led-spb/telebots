@@ -1,45 +1,62 @@
-import requests
-import logging
 import json
-import time
-import threading
-import traceback
+import logging
+from tornado.httpclient import AsyncHTTPClient, HTTPRequest
+from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado import gen
+from uuid import uuid4
+from functools import partial
+from datetime import timedelta
+
+def authorized(func):
+    def wrapped(self, message):
+        admins = self.bot.admins
+        if message is None or message['from']['id'] in admins:
+            return func(self, message)
+        else:
+            self.bot.logger.warn(
+                "User %d/%s %s is unauthorized",
+                message['from']['id'], 
+                message['from']['first_name'],
+                message['from']['last_name']
+            )
+    return wrapped
 
 
 class BotRequestHandler:
     def commands(self):
         return ['/'+x[4:] for x in dir(self) if x.find('cmd_') == 0]
 
-    def getEvent(self, name):
-        if hasattr(self, "event_"+name):
-            return getattr(self, "event_"+name)
-        else:
-            return None
-
     def getCommand(self, name):
         if name.find('/') == 0 and hasattr(self, "cmd_"+name[1:]):
             return getattr(self, "cmd_"+name[1:])
         else:
-            return None
+            return self.defaultCommand()
+
+    def defaultCommand(self):
+        return None
 
     def assignTo(self, bot):
         self.bot = bot
 
 
-class Bot:
-    def __init__(self, token, admins, handler=None, logger=None, proxy=None):
+class Bot():
+
+    def __init__(self, token, admins=None, handler=None, logger=None, proxy=None, ioloop=None):
         self.logger = logger or logging.getLogger(self.__class__.__name__)
 
         self.token = token
+        self.admins = admins or []
+        self.proxy = proxy
+
         self.baseUrl = 'https://api.telegram.org/bot%s' % self.token
-        self.admins = admins
         self.handlers = []
         if handler is not None:
             self.addHandler(handler)
-        self._thread_terminate = False
-        self.session = requests.Session()
-        if proxy!=None:
-            self.session.proxies = { 'https': proxy }
+
+        self.ioloop = ioloop or IOLoop.current()
+        self._client = AsyncHTTPClient()
+        self.params = {'timeout': 60, 'offset': 0, 'limit': 5}
+
 
     def addHandler(self, handler):
         if handler is not None:
@@ -47,11 +64,30 @@ class Bot:
             self.handlers.append(handler)
         pass
 
-    def process_callback(self, callback):
-        self.session.post(
-            self.baseUrl + '/answerCallbackQuery',
-            {'callback_query_id': callback['id']}
+    def request_loop(self):
+        request = HTTPRequest(
+            url = self.baseUrl+'/getUpdates',
+            method = 'POST',
+            headers = { "Content-Type": "application/json" },
+            body = json.dumps( self.params ),
+            request_timeout = self.params['timeout']+5
         )
+        self._client.fetch( request, callback = self._on_updates_ready, raise_error = False )
+        return
+
+    def exec_command(self, message):
+        self.logger.debug( json.dumps(message, indent=2) )
+        if 'text' in message:
+             params = message['text'].lower().split()
+             command = params[0]
+             self.logger.info('Processing command %s (%s)', command, ", ".join(params[1:]) )
+
+             for handler in self.handlers:
+                 functor = handler.getCommand(command)
+                 if functor is not None:
+                     functor.__call__( message )
+        else:
+             raise Exception('Only text messages supported')
         pass
 
     def process_updates(self, updates):
@@ -59,7 +95,6 @@ class Bot:
             if 'callback_query' in update:
                 callback = update['callback_query']
                 self.process_callback( callback )
-                # answer to callback
 
                 message = callback['message']
                 message['from'] = callback['from']
@@ -68,154 +103,158 @@ class Bot:
 
             if 'message' in update:
                 message = update['message']
-
-                if 'from' in message and 'text' in message:
+                if 'from' in message:
                     user = message['from']
-                    if user['id'] in self.admins:
-                        self.logger.info(
-                            "request \"%s\" from %d/%s",
-                            message['text'],
-                            message['from']['id'],
-                            message['from']['first_name']
-                        )
-                        self.exec_command( message )
-                else:
-                    self.logger.warn("Unauthorized request from %s", json.dumps(user) )
+                    message_type = "unknown"
+                    if "text" in message:
+                       message_type = message["text"]
+                    if "contact" in message:
+                       message_type = "contact"
+                    if "location" in message:
+                       message_type = "location"
+                    if "document" in message:
+                       message_type = "document"
 
+                    self.logger.info(
+                         "request \"%s\" from %d/%s",
+                         message_type,
+                         message['from']['id'],
+                         message['from']['first_name']
+                    )
+                    try:
+                        self.exec_command( message )
+                    except:
+                        logging.exception('Error while processing request')
             self.params['offset'] = update['update_id']+1
         return
 
-    def request_loop(self):
-        self.params = {'timeout': 60, 'offset': 0, 'limit': 5}
-        while not self._thread_terminate:
-            try:
-                req = self.session.post(
-                    self.baseUrl+'/getUpdates',
-                    self.params,
-                    timeout= self.params['timeout']+5
-                )
-                result = req.json()
-                self.logger.debug('updates:')
-                self.logger.debug(json.dumps(result, indent=2))
+    def process_callback(self, callback):
+        client = AsyncHTTPClient()
+        request = HTTPRequest(
+            self.baseUrl + '/answerCallbackQuery?callback_query_id=%s' % callback['id']
+        )
+        return client.fetch(request, raise_error=False)
+        pass
 
-                if result['ok']:
-                    updates = result['result']
-                    self.process_updates(updates)
-                else:
-                    self.logger.error(
-                        'Error while recieve updates from server'
-                    )
-                    self.logger.error(result)
-            except KeyboardInterrupt, ke:
-                return
-            except BaseException, e:
-                self.logger.exception(
+    def _on_updates_ready(self, response):
+        try:
+            response.rethrow()
+            result = json.loads(response.body)
+
+            self.logger.debug('updates:')
+            self.logger.debug(json.dumps(result, indent=2))
+            if result['ok']:
+               updates = result['result']
+               try:
+                  self.process_updates(updates)
+               except:
+                  self.logger.exception(
+                      'Error while processing updates'
+                  )
+            else:
+               self.logger.error(
                     'Error while recieve updates from server'
-                )
-                time.sleep(30)
+               )
+               self.logger.error(result)
+
+            self.loop_start()
+        except:
+            self.logger.exception(
+                    'Error while recieve updates from server'
+            )
+            self.loop_start(10)
             pass
-        return
 
-    def loop_start(self):
-        self._thread = threading.Thread(target=self.request_loop)
-        self._thread.daemon = True
-        self._thread.start()
+    def _on_message_cb( self, response ):
+        try:
+            response.rethrow()
+        except:
+            self.logger.exception("Error while sending message")
         pass
 
-    def loop_stop(self):
-        self._thread_terminate = True
-        if threading.current_thread() != self._thread:
-            self._thread.join()
-            self._thread = None
-        pass
-
-    def loop_forever(self):
-        self.request_loop()
-        pass
-
-    def exec_inline(self, message):
-        pass
-
-    def exec_command(self, message):
-        params = message['text'].lower().split()
-        command = params[0]
-        self.logger.debug('Processing command %s (%s)', command, ", ".join(params[1:]) )
-        ret = None
-
-        for handler in self.handlers:
-            functor = handler.getCommand(command)
-            if functor:
-                try:
-                    if 'full_message' in functor.func_code.co_varnames:
-                        resp = functor.__call__(full_message=message['text'])
-                    else:
-                        resp = functor.__call__(*params[1:])
-                except BaseException, e:
-                    resp = traceback.format_exc()
-
-                if resp is None:
-                    return
-                if type(resp) != list:
-                    resp = [resp]
-                for item in resp:
-                    self.__send_response(message['chat']['id'], item)
-                return
-
-        cmds = []
-        for x in self.handlers:
-            cmds = cmds + x.commands()
-        msg = "Unknown command\n%s" % "\n".join(cmds)
-        self.logger.debug( msg )
-        self.__send_response(message['chat']['id'], msg)
-        pass
-
-    def __send_response(self, to, response):
-        if response is None:
-            return
-
-        if type(response) == dict:
-            self.send_message(to, **response)
-        elif type(response) == file:
-            self.send_message(to, document=response)
+    def loop_start(self, delay=0):
+        if delay>0:
+            self.ioloop.add_timeout(timedelta(seconds=15), self.request_loop)
         else:
-            self.send_message(to, text=response)
+            self.ioloop.add_callback(self.request_loop)
+
+    @gen.coroutine
+    def multipart_producer( self, boundary, body, files, write ):
+        boundary_bytes = boundary.encode()
+
+        for key, value in body.iteritems():
+            buf = ( 
+                   ( b'--%s\r\n' % (boundary_bytes,)) 
+                   + ( b'Content-Disposition: form-data; name="%s"\r\n' % key.encode() )
+                   + ( b'\r\n%s\r\n' % str(value).encode() )
+              )
+            yield write(buf)
+
+        for key, value in files.iteritems():
+            filename = value[0]
+            f = value[1]
+            mtype = value[2]
+            self.logger.debug("FILE: %s: %s %s", key, filename, mtype)
+
+            buf = (
+                  (b"--%s\r\n" % boundary_bytes)
+                  + (
+                      b'Content-Disposition: form-data; name="%s"; filename="%s"\r\n'
+                       % (key.encode(), filename.encode())
+                    )
+                  + (b"Content-Type: %s\r\n" % mtype.encode())
+                  + b"\r\n"
+            )
+            yield write(buf)
+
+            while True:
+                chunk = f.read(16 * 1024)
+                if not chunk:
+                    break
+                yield write(chunk)
+            yield write(b"\r\n")
+
+        yield write(b"--%s--\r\n" % (boundary_bytes,))
         pass
 
-    def exec_event(self, event_name, *event_data):
-        for handler in self.handlers:
-            functor = handler.getEvent(event_name)
-            if functor:
-                try:
-                    response = functor.__call__(*event_data)
-                except BaseException, e:
-                    response = str(e)
-                for to in self.admins:
-                    self.__send_response(to, response)
-                return
-        pass
-
-    def send_message_admins( self, **kwargs ):
-        for to_chat_id in self.admins:
-            self.send_message( to_chat_id, **kwargs )
-        return
-
-    def send_request( self, url, method='GET', body=None, files={}, timeout=15 ):
-        if method=='GET' and body is None:
-           req = self.session.get( url, timeout=timeout )
+    def send_request( self, url, method='GET', body=None, files={}, timeout=15, callback=None ):
+        client = AsyncHTTPClient()
+        if len(files)==0:
+            request = HTTPRequest( url, 
+                headers = { "Content-Type": "application/json" },
+                method = 'POST', body = json.dumps(body)
+            )
         else:
-           req = self.session.post( url, body, files=files, timeout=timeout )
-        result = req.json()
-        self.logger.debug('Response: ' + json.dumps(result))
-        if result['ok']:
-            return
-        self.logger.error('Error while send message')
-        self.logger.error(result)
-        return
+            boundary = uuid4().hex
+            request = HTTPRequest( url, 
+                headers = {"Content-Type": "multipart/form-data; boundary=%s" % boundary},
+                method = 'POST', 
+                body_producer = partial( 
+                    self.multipart_producer,
+                    boundary, body, files
+                )
+            )
+        return client.fetch( request, callback=callback or self._on_message_cb, raise_error = False )
+
+    def edit_message( self, to, message_id, text, markup=None, extra=None, callback=None ):
+        params = {'chat_id': to, 'message_id': message_id, 'text': text}
+        if markup is not None:
+            params['reply_markup'] = json.dumps(markup)
+        if extra is not None:
+            for key, val in extra.iteritems():
+                params[key] = val
+
+        return self.send_request( 
+                   self.baseUrl + '/editMessageText',
+                   method = 'POST', body=params, 
+                   timeout=10, 
+                   callback=callback
+        )
 
     def send_message(
             self, to, text=None, photo=None, video=None,
             audio=None, voice=None, document=None, markup=None, 
-	    latitude=None, longitude=None, reply_to_id=None, extra=None):
+	    latitude=None, longitude=None, reply_to_id=None, extra=None, callback=None):
         params = {'chat_id': to}
         files = {}
 
@@ -251,10 +290,7 @@ class Bot:
             for key, val in extra.iteritems():
                 params[key] = val
 
-        try:
-            self.send_request( self.baseUrl + '/send%s' % (method),
-               method = 'POST', body=params, files=files, timeout=10
-            )
-        except BaseException, e:
-            self.logger.exception('Error while send message')
+        return self.send_request( self.baseUrl + '/send%s' % (method),
+               method = 'POST', body=params, files=files, timeout=10, callback=callback
+        )
         pass
