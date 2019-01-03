@@ -1,14 +1,13 @@
 import logging
 import argparse
 import urlparse
-import paho.mqtt.client as mqtt
+import asyncmqtt.client as mqtt
 import json
 import datetime
 import zlib
 import gpxpy.gpx
 import gpxpy.geo
 from cStringIO import StringIO
-from asyncmqtt import TornadoMqttClient
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 from telebot import Bot, BotRequestHandler, authorized
@@ -21,24 +20,24 @@ def json_serial(obj):
         return obj.isoformat()
     raise TypeError("Type %s is not serializable" % type(obj))
 
-class CarMonitor(TornadoMqttClient, BotRequestHandler):
+class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
     def __init__(self, ioloop, url, name):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.url = url
-        self.devices = defaultdict( lambda: defaultdict( lambda: defaultdict( lambda: None) ) )
+        self.devices = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: None)))
         self.ioloop = ioloop
         self.name = name
         self.low_battery = (10,15)
 
-        self.tz_offset = datetime.timedelta( hours=3 )
-        self.msg_expire_delta = datetime.timedelta( minutes=15)
+        self.tz_offset = datetime.timedelta(hours=3)
+        self.msg_expire_delta = datetime.timedelta(minutes=15)
         self.jinja = Environment()
         self.jinja.filters['human_date'] = self.human_date
         self.activity_check_interval = datetime.timedelta( seconds=323 )
 
         self.ioloop.add_timeout(  datetime.timedelta(seconds=15), self.activity_job )
 
-        TornadoMqttClient.__init__(self, 
+        mqtt.TornadoMqttClient.__init__(self, 
              ioloop = ioloop,
              host = url.hostname, 
              port = url.port if url.port!=None else 1883,
@@ -62,14 +61,14 @@ class CarMonitor(TornadoMqttClient, BotRequestHandler):
                              self.logger.warn( msg )
 
                              self.bot.send_message(to=chat_id, text = msg, extra={'parse_mode':'HTML'} )
-                             self.cmd_info(device)
+                             self.cmd_info(None)
                              self.bot.send_message(to=chat_id, latitude=status['location'][0], longitude=status['location'][1] )
                      else:
                          if prev_signal_lost:
                              msg = '<b>NORM</b> signal from %s is catched now' % device
                              self.logger.warn( msg )
                              self.bot.send_message(to=chat_id, text = msg, extra={'parse_mode':'HTML'} )
-                             self.cmd_info(device)
+                             self.cmd_info(None)
                              self.bot.send_message(to=chat_id, latitude=status['location'][0], longitude=status['location'][1] )
                      status['lost']  = is_signal_lost
                  pass
@@ -183,7 +182,7 @@ signal: {{info.location.src}} {{info.location.sat}}
             distance = gpxpy.geo.distance(last_location[0], last_location[1],None, payload['lat'],payload['lon'], None)
 
         if distance>500:
-            self.cmd_location()
+            self.cmd_location(message=None)
 
         self.devices[device]['status']['low_batt']      = low_battery
         self.devices[device]['status']['location_date'] = event_time

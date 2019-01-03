@@ -1,6 +1,6 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-
+import re
 import os
 import os.path
 import logging
@@ -9,17 +9,15 @@ import time
 import json
 import urlparse
 from telebot import Bot, BotRequestHandler
-import paho.mqtt.client as mqtt
+import asyncmqtt.client as mqtt
 from cStringIO import StringIO
-import re
 from telebot import Bot, BotRequestHandler, authorized
-from asyncmqtt import TornadoMqttClient
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.httpclient import AsyncHTTPClient
 
 
-class HomeBotHandler(BotRequestHandler, TornadoMqttClient):
+class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
     def __init__(self, ioloop, mqtt_url, sensors=None, cameras=None):
         self.logger  = logging.getLogger(self.__class__.__name__)
         self.ioloop  = ioloop
@@ -36,7 +34,7 @@ class HomeBotHandler(BotRequestHandler, TornadoMqttClient):
                          (host, port))
 
         self.subscribe = False
-        TornadoMqttClient.__init__(self, 
+        mqtt.TornadoMqttClient.__init__(self, 
              ioloop = ioloop,
              host = mqtt_url.hostname, 
              port = mqtt_url.port if mqtt_url.port!=None else 1883,
@@ -175,9 +173,9 @@ class HomeBotHandler(BotRequestHandler, TornadoMqttClient):
 
     def event_notify(self, path, payload):
         self.logger.info("Event notify")
-        for admin in self.bot.admins:
+        for chat_id in self.bot.admins:
             self.bot.send_message(
-                to=admin, text=payload
+                to=chat_id, text=payload
             );
         pass
 
@@ -190,9 +188,9 @@ class HomeBotHandler(BotRequestHandler, TornadoMqttClient):
            (sensor not in self.events or
            (now-self.events[sensor]) > self.event_gap):
             self.events[sensor] = now
-            for admin in self.bot:
+            for chat_id in self.bot.admins:
                 self.bot.send_message(
-                   to=admin, text="%s: alert %s" % (sensor, time.strftime("%d.%m %H:%M"))
+                   to=chat_id, text="%s: alert %s" % (sensor, time.strftime("%d.%m %H:%M"))
                 )
         pass
 

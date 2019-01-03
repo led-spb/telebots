@@ -27,28 +27,26 @@ from telebot import Bot, BotRequestHandler, authorized
 from jinja2 import Environment, Template
 
 
-class ItemRenderer:
-   def __init__(self):
-       self.jinja2 = Environment()
-       self.jinja2.filters['datetimeformat'] = self._datetimeformat
-       self.jinja2.filters['todatetime'] = self._todatetime
-       self.template = self.jinja2.from_string(
-u"""<b>{{item.title|e}}</b>
-Раздел: {{item.category|e}}
-Размер: {% if item.size | int(-1) == -1 %}{{item.size | e}}{% else %}{{ item.size | default(0) | int | filesizeformat }}{% endif %}
-Добавлено: {{ item.added | default(0) | int | todatetime | datetimeformat('%d-%m-%Y') }}
-Скачать: /download_{{item.id}}
+class Renderer():
 
-""")
+    def __init__(self, template=None):
+        self.jinja2 = Environment()
+        self.jinja2.filters['datetimeformat'] = self._datetimeformat
+        self.jinja2.filters['todatetime'] = self._todatetime
+        if template is not None:
+            self.set_template(template)
 
-   def _datetimeformat(self, value, format='%d-%m-%Y %H:%M:%s'):
-       return value.strftime(format)
+    def set_template(self, template):
+        self.template = self.jinja2.from_string( template )
 
-   def _todatetime(self, value):
-       return datetime.fromtimestamp( int(value) )
-        
-   def render(self, item):
-       return self.template.render( item = item)
+    def _datetimeformat(self, value, format='%d-%m-%Y %H:%M:%s'):
+        return value.strftime(format)
+
+    def _todatetime(self, value):
+        return datetime.fromtimestamp( int(value) )
+         
+    def render(self, item):
+        return self.template.render( item = item)
 
 
 class ResultItem:
@@ -218,6 +216,7 @@ class Noname_club(TrackerHelper):
         if match:
             download_id = match.group(1)
         else:
+            self.isAuth = False
             raise Exception("Could not find download id")
 
         # download
@@ -386,7 +385,9 @@ class TransmissionManager(TorrentManager):
     name = "transmission"
 
     def __init__(self, url):
+        TorrentManager.__init__(self, url)
         res = urlparse( url )
+
         self.client = AsyncHTTPClient()
         self.base_url = "http://%s:%d/transmission/rpc" % (res.hostname, res.port)
         self.headers = {'Content-Type': 'application/json'}
@@ -416,13 +417,15 @@ class TransmissionManager(TorrentManager):
     def get_torrents(self):
         logging.info("Get torrent list")
         result = []
-        torrents = yield self.request('torrent-get', fields=['id', 'name', 'comment', 'hashString'])
+        torrents = yield self.request('torrent-get', fields=['id', 'name', 'comment', 'hashString','status','errorString','metadataPercentComplete'])
 
         for t in torrents['arguments']['torrents']:
             info = {
                "id":  t['id'], 
                "name": t['name'],
                "url": t['comment'].strip(), 
+               "error": t['errorString'].strip(),
+               "status": t['status'], "done": t['metadataPercentComplete'],
                "info_hash": t['hashString'].upper()
             }
             result.append(info)
@@ -471,7 +474,20 @@ class UpdateChecker(BotRequestHandler):
         self.ioloop   = ioloop or IOLoop.current()
         self.manager  = manager
         self.trackers = trackers
-        self.renderer = ItemRenderer()
+
+        self.search_renderer = Renderer(
+u"""<b>{{item.title|e}}</b>
+Раздел: {{item.category|e}}
+Размер: {% if item.size | int(-1) == -1 %}{{item.size | e}}{% else %}{{ item.size | default(0) | int | filesizeformat }}{% endif %}
+Добавлено: {{ item.added | default(0) | int | todatetime | datetimeformat('%d-%m-%Y') }}
+Скачать: /download_{{item.id}}
+
+"""
+)
+        self.torrent_renderer = Renderer(
+u"""<b>{{ item.name | e }}</b> - {{ "%0.2f" | format(item.done*100) }}% done
+ 
+""")
         self.cache = []
         pass
 
@@ -502,6 +518,17 @@ class UpdateChecker(BotRequestHandler):
         pass
 
     @authorized
+    @gen.coroutine
+    def cmd_status(self, message=None):
+        torrents = yield self.manager.get_torrents()
+        logging.info( repr(torrents) )
+        text = [ self.torrent_renderer.render(x) for x in torrents]
+        self.bot.send_message(
+           to=message['chat']['id'], reply_to_id=message['message_id'], text= "".join(text), extra={'parse_mode': 'HTML'}
+        )
+        pass
+
+    @authorized
     def cmd_update(self, message=None):
         pass
 
@@ -509,7 +536,7 @@ class UpdateChecker(BotRequestHandler):
         message = 'Sorry, nothing is found'
         markup = None
         if len(results)>0:
-            data = map( (lambda i: self.renderer.render(results[i]) ), range( start-1, min( start+page_size-1, len(results)) ) )
+            data = map( (lambda i: self.search_renderer.render(results[i]) ), range( start-1, min( start+page_size-1, len(results)) ) )
             message = u"\n".join(data)
 
             buttons=[]
@@ -605,9 +632,10 @@ class UpdateChecker(BotRequestHandler):
         self.show_results(search_id, chat_id, message_id, results, 1)
         pass
 
+    @gen.coroutine
     def do_update(self):
         """
-        torrents = self.manager.get_torrents()
+        torrents = yield self.manager.get_torrents()
         for torrent in torrents:
             logging.info( "Checking updates of \"%s\"", torrent['name'] )
             torrent_data = self._download_torrent(torrent['url'], torrent['info_hash'])
