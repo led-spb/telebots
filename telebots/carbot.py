@@ -10,7 +10,7 @@ import gpxpy.geo
 from cStringIO import StringIO
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
-from telebot import Bot, BotRequestHandler, authorized
+from asynctelebot.telebot import Bot, BotRequestHandler, authorized
 from jinja2 import Environment, Template
 import humanize
 from collections import defaultdict

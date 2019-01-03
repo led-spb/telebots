@@ -19,11 +19,10 @@ import urllib
 import traceback
 from datetime import datetime
 from urlparse import urlparse
-
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado import gen
-from telebot import Bot, BotRequestHandler, authorized
+from asynctelebot.telebot import Bot, BotRequestHandler, authorized
 from jinja2 import Environment, Template
 
 

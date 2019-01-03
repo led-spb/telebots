@@ -8,10 +8,9 @@ import argparse
 import time
 import json
 import urlparse
-from telebot import Bot, BotRequestHandler
 import asyncmqtt.client as mqtt
 from cStringIO import StringIO
-from telebot import Bot, BotRequestHandler, authorized
+from asynctelebot.telebot import Bot, BotRequestHandler, authorized
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.httpclient import AsyncHTTPClient

@@ -23,6 +23,7 @@ setuptools.setup(
        'pysocks',
        'paho_mqtt',
        'asyncmqtt',
+       'asynctelebot',
        'bencode',
        'tornado',
        'jinja2',

@@ -5,7 +5,7 @@ import os, os.path, logging
 import sys, argparse
 import time, json
 import urlparse
-from telebot import Bot, BotRequestHandler
+from asynctelebot.telebot import Bot, BotRequestHandler
 import requests
 import re
 import hashlib
