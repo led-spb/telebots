@@ -15,10 +15,12 @@ from jinja2 import Environment, Template
 import humanize
 from collections import defaultdict
 
+
 def json_serial(obj):
     if isinstance(obj, (datetime.datetime,datetime.date)):
         return obj.isoformat()
     raise TypeError("Type %s is not serializable" % type(obj))
+
 
 class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
     def __init__(self, ioloop, url, name):
@@ -148,6 +150,10 @@ signal: {{info.location.src}} {{info.location.sat}}
         f = open( filename, "wb" )
         f.write( gpx.to_xml() )
         f.close()
+        pass    
+
+    def on_msg(self, device, event_time, payload):
+        self.logger.info("Message from %s: %s", device, payload['text'])
         pass    
 
     def on_location(self, device, event_time, payload):
