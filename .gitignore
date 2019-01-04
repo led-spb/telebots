@@ -1,3 +1,5 @@
+venv
+.idea
 *.dat
 *.conf
 build

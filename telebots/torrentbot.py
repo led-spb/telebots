@@ -1,15 +1,11 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 import re
-import sys
 import os
-import requests
 import cookielib
 import argparse
-import shutil
 import hashlib
 import json
-import bencode
 import logging
 import base64
 import bencode
@@ -36,16 +32,16 @@ class Renderer():
             self.set_template(template)
 
     def set_template(self, template):
-        self.template = self.jinja2.from_string( template )
+        self.template = self.jinja2.from_string(template)
 
     def _datetimeformat(self, value, format='%d-%m-%Y %H:%M:%s'):
         return value.strftime(format)
 
     def _todatetime(self, value):
-        return datetime.fromtimestamp( int(value) )
+        return datetime.fromtimestamp(int(value))
          
     def render(self, item):
-        return self.template.render( item = item)
+        return self.template.render(item=item)
 
 
 class ResultItem:
@@ -99,24 +95,30 @@ class TrackerHelper(object):
 
     def __init__(self, url, proxy=None):
         res = urlparse(url)
-        self.user     = res.username
-        self.passwd   = res.password
+        self.user = res.username
+        self.passwd = res.password
         self.base_url = "%s://%s/" % (res.scheme, res.hostname)
 
-        self.session = requests.Session()
-        self.session.cookies = TrackerHelper.cookies
-        self.session.headers = {
+        self.cookies = TrackerHelper.cookies
+        self.headers = {
               'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/29.0.1547.66 Safari/537.36',
               'Accept-Charset': 'utf-8'
         }
-        if proxy!=None:
-            self.session.proxies = {'http': proxy}
+        self.proxies = {}
+        if proxy is not None:
+            self.proxies = {'http': proxy}
+        pass
 
     def login(self):
         pass
 
     def check_url(self, url):
-        return re.search("^%s" % self.base_url, url) != None
+        names = [self.name] if not isinstance(self.name,list) else self.name
+        for name in names:
+            if re.search('^http://%s' % name, url) is not None:
+                return True
+        #return re.search("^%s" % self.base_url, url) is not None
+        return False
 
     def download(self, url):
         pass
@@ -125,8 +127,8 @@ class TrackerHelper(object):
         pass
 
 
-class Noname_club(TrackerHelper):
-    name   = ["nnm-club.me", "nnmclub.to"]
+class NonameClub(TrackerHelper):
+    name = ["nnm-club.me", "nnmclub.to"]
 
     def __init__(self, url, proxy ):
         TrackerHelper.__init__(self, url, proxy )
@@ -156,7 +158,7 @@ class Noname_club(TrackerHelper):
         logging.info("Initial connect to %s", self.base_url)
         request = HTTPRequest(
             url,
-            headers = self.session.headers,
+            headers = self.headers,
             method = 'GET',
             connect_timeout=5, request_timeout=20
         )
@@ -176,7 +178,7 @@ class Noname_club(TrackerHelper):
             login_data[ m.group(1) ] = m.group(2)
 
         request = HTTPRequest(
-            url, headers=self.session.headers , method='POST', body=urllib.urlencode(login_data),
+            url, headers=self.headers , method='POST', body=urllib.urlencode(login_data),
             connect_timeout=5, request_timeout=60
         )
         logging.info("Passing credentinals to %s", self.base_url)
@@ -202,12 +204,12 @@ class Noname_club(TrackerHelper):
         logging.info("Start download %s", url)
         request = HTTPRequest(
             url+'&sid=%s'%self.sid,
-            headers = self.session.headers,
+            headers = self.headers,
             method = 'GET',
             connect_timeout=5, request_timeout=20
         )
         response = yield self.client.fetch(request, raise_error = False)
-        logging.info("Response code: %d %s", response.code, response.reason)
+        logging.debug("Response code: %d %s", response.code, response.reason)
         response.rethrow()
 
         download_id = None
@@ -220,15 +222,15 @@ class Noname_club(TrackerHelper):
 
         # download
         url = "%sforum/download.php?id=%s&sid=%s" % (self.base_url, download_id, self.sid)
-        logging.info("Start download %s", url)
+        logging.debug("Start download %s", url)
         request = HTTPRequest(
             url,
-            headers = self.session.headers,
+            headers = self.headers,
             method = 'GET',
             connect_timeout=5, request_timeout=20
         )
         response = yield self.client.fetch(request, raise_error = False)
-        logging.info("Response code: %d %s", response.code, response.reason)
+        logging.debug("Response code: %d %s", response.code, response.reason)
         response.rethrow()
         raise gen.Return(response.body)
         pass
@@ -241,31 +243,30 @@ class Noname_club(TrackerHelper):
         url = "%sforum/tracker.php" % self.base_url
         request = HTTPRequest(
                 url,
-                headers = self.session.headers,
+                headers = self.headers,
                 method = 'POST', 
                 body = urllib.urlencode({
-                  'f': u'-1', 'nm': query.encode('windows-1251'),'submit_search': (u'Поиск').encode('windows-1251'),
+                  'f': u'-1', 'nm': query.encode('windows-1251'),'submit_search': u'Поиск'.encode('windows-1251'),
                 }), connect_timeout=5, request_timeout=10
         )
-        logging.info("Make request to %s", url)
-        response = yield self.client.fetch( request, raise_error = False )
-        logging.info("Response code: %d %s", response.code, response.reason)
+        logging.debug("Make request to %s", url)
+        response = yield self.client.fetch(request, raise_error=False)
+        logging.debug("Response code: %d %s", response.code, response.reason)
 
         response.rethrow()
 
-        tree = lxml.html.fromstring( response.body )
-        sel = lxml.cssselect.CSSSelector( u"table.forumline.tablesorter tr.prow1,tr.prow2" )
+        tree = lxml.html.fromstring(response.body)
+        sel = lxml.cssselect.CSSSelector(u"table.forumline.tablesorter tr.prow1,tr.prow2")
         results = []
         for item in sel(tree):
             try:
-               res = self.parse_result(item)
-               results.append( res )
+                res = self.parse_result(item)
+                results.append(res)
             except:
-               logging.exception("Parsing error")
+                logging.exception("Parsing error")
 
         raise gen.Return(results)
         pass
-
 
     def parse_result(self, element):
         cells = element.cssselect('td')
@@ -280,11 +281,19 @@ class Noname_club(TrackerHelper):
         size = 0
         added = 0
         try:
-            size     = int(cells[5].cssselect('u')[0].text_content().strip())
-            added    = int(cells[9].cssselect('u')[0].text_content().strip())
+            size = int(cells[5].cssselect('u')[0].text_content().strip())
+            added = int(cells[9].cssselect('u')[0].text_content().strip())
         except:
             pass
-        return ResultItem(id="nnm_"+item_id, title=title, category=category, link=os.path.join(self.base_url,'forum/',href), added=added, size=size)
+
+        item = ResultItem(id="nnm_"+item_id,
+                          title=title,
+                          category=category,
+                          link=os.path.join(self.base_url,'forum/',href),
+                          added=added,
+                          size=size
+        )
+        return item
 
 
 class Rutor(TrackerHelper):
@@ -305,16 +314,16 @@ class Rutor(TrackerHelper):
         logging.info("Make request to %s", self.base_url)
         request = HTTPRequest(
                 url,
-                headers = self.session.headers,
+                headers = self.headers,
                 method = 'GET', 
                 connect_timeout=5, request_timeout=10
         )
         response = yield self.client.fetch( request, raise_error = False )
         try:
-            logging.info("Response code: %d %s", response.code, response.reason)
+            logging.debug("Response code: %d %s", response.code, response.reason)
             response.rethrow()
         except:
-            logging.exception("Error while connecting")
+            logging.exception("Error making request")
             raise gen.Return([])
 
         tree = lxml.html.fromstring( response.body )
@@ -333,12 +342,13 @@ class Rutor(TrackerHelper):
         m = re.search('(\d+)$', href)
         item_id = m.group(1)
 
-        title    = cells[1].cssselect('a')[1].text_content().strip()
+        title = cells[1].cssselect('a')[1].text_content().strip()
         category = 'rutor'
-        size     = cells[3].text_content().strip()
+        size = cells[3].text_content().strip()
 
         date_str = cells[0].text_content().strip()
-        added    = dateparser.parse( date_str, languages=['ru','en'] )# - datetime.datetime(1970, 1, 1) ).total_seconds() )
+        added = None
+        #added    = dateparser.parse( date_str, languages=['ru','en'] )# - datetime.datetime(1970, 1, 1) ).total_seconds() )
         if added != None:
             added = (added - datetime.datetime(1970, 1, 1) ).total_seconds()
         else:
@@ -394,71 +404,95 @@ class TransmissionManager(TorrentManager):
 
     @gen.coroutine
     def request(self, method, **kwargs):
-        params = {'method': method, 'arguments': kwargs }
-        logging.info("Make request method: %s", method)
+        params = {'method': method, 'arguments': kwargs}
+        logging.debug("Make request method: %s", method)
 
         for i in range(2):
-           request = HTTPRequest(
+            request = HTTPRequest(
                self.base_url, method='POST',
                headers = self.headers,
                body = json.dumps(params),
                connect_timeout=5, request_timeout=10
-           )
-           response = yield self.client.fetch(request, raise_error=False)
-           logging.info( response.body )
-           if response.code == 409:
-               self.headers['X-Transmission-Session-Id'] = response.headers['X-Transmission-Session-Id']
-           else:
-               raise gen.Return(json.loads(response.body))
+            )
+            response = yield self.client.fetch(request, raise_error=False)
+            logging.debug(response.body)
+            if response.code == 409:
+                self.headers['X-Transmission-Session-Id'] = response.headers['X-Transmission-Session-Id']
+            else:
+                result = json.loads(response.body)
+                if result['result'] != 'success':
+                    raise RuntimeError(result['result'])
+                raise gen.Return(result.get('arguments'))
         raise gen.Return(None)
 
     @gen.coroutine
     def get_torrents(self):
-        logging.info("Get torrent list")
+        logging.debug("Get torrent list")
         result = []
-        torrents = yield self.request('torrent-get', fields=['id', 'name', 'comment', 'hashString','status','errorString','metadataPercentComplete'])
+        response = yield self.request(
+            'torrent-get',
+            fields=[
+                'id', 'name', 'comment', 'hashString', 'status', 'errorString', 'metadataPercentComplete',
+                'files', 'fileStats', 'downloadDir'
+            ]
+        )
 
-        for t in torrents['arguments']['torrents']:
+        for t in response['torrents']:
+            files = []
+            for i in range(len(t['files'])):
+                f = t['files'][i]
+                f.update(t['fileStats'][i])
+                files.append(f)
+
             info = {
-               "id":  t['id'], 
-               "name": t['name'],
-               "url": t['comment'].strip(), 
-               "error": t['errorString'].strip(),
-               "status": t['status'], "done": t['metadataPercentComplete'],
-               "info_hash": t['hashString'].upper()
+                'id':  t['id'],
+                'name': t['name'],
+                'url': t['comment'].strip(),
+                'error': t['errorString'].strip(),
+                'status': t['status'],
+                'done': t['metadataPercentComplete'],
+                'info_hash': t['hashString'].upper(),
+                'downloadDir': t['downloadDir'],
+                'files': files
             }
             result.append(info)
         raise gen.Return(result)
 
     @gen.coroutine
-    def add_torrent(self, torrent_data, torrent=None):
+    def add_torrent(self, torrent_data, old_torrent_info=None):
+        info_hash = None
         try:
             # Check downloaded torrent file for correctly and info_hash changed
             tr_info = bencode.bdecode( torrent_data )
             info_hash = self.info_hash( tr_info['info'] )
-
-            if torrent is not None and torrent['info_hash']==info_hash:
-                logging.info('No updates')
-                return
-            torrent_data = base64.b64encode(torrent_data)
-
-
-            # Retrieve info about current torrent
-            if torrent!=None:
-                """
-                torrent = self.client.get_torrent( torrent['id'] )
-                download_dir = torrent.downloadDir
-                unwanted_files = [k for k,v in torrent.files().iteritems() if not v['selected']  ]
-                # add updated torrent
-                self.client.add( torrent_data, download_dir=download_dir, files_unwanted=unwanted_files )
-                # remove old torrent
-                self.client.remove_torrent( torrent.id )"""
-                pass
-            else:
-                response = yield self.request( method='torrent-add', metainfo=torrent_data )
-            logging.info("Torrent data updated")
         except Exception, e:
             logging.exception("Bad torrent file")
+
+        if old_torrent_info is not None and old_torrent_info['info_hash'] == info_hash:
+            logging.info('No updates')
+            raise gen.Return(False)
+
+        torrent_data = base64.b64encode(torrent_data)
+
+        if old_torrent_info is not None:
+            unwanted = [k for k, v in old_torrent_info['files'].iteritems() if not v['wanted']]
+
+            response = yield self.request(**{
+                'method': 'torrent-add',
+                'metainfo': torrent_data,
+                'download-dir': old_torrent_info['downloadDir'],
+                'files-unwanted': unwanted
+            })
+
+            response = yield self.request(
+                method='torrent-remove',
+                ids=[old_torrent_info['id']]
+            )
+            pass
+        else:
+            response = yield self.request(method='torrent-add', metainfo=torrent_data)
+        logging.info("Torrent data updated")
+        raise gen.Return(True)
         pass
 
     def info_hash(self, info):
@@ -470,8 +504,8 @@ class TransmissionManager(TorrentManager):
 
 class UpdateChecker(BotRequestHandler):
     def __init__(self, manager, trackers, ioloop=None):
-        self.ioloop   = ioloop or IOLoop.current()
-        self.manager  = manager
+        self.ioloop = ioloop or IOLoop.current()
+        self.manager = manager
         self.trackers = trackers
 
         self.search_renderer = Renderer(
@@ -488,6 +522,7 @@ u"""<b>{{ item.name | e }}</b> - {{ "%0.2f" | format(item.done*100) }}% done
  
 """)
         self.cache = []
+        self.update_task = PeriodicCallback(self.do_update, 15*60*1000)
         pass
 
     def defaultCommand(self):
@@ -508,7 +543,7 @@ u"""<b>{{ item.name | e }}</b> - {{ "%0.2f" | format(item.done*100) }}% done
 
         search_id = int(data[1])
         start = int(data[2])
-        if search_id>=0 and search_id<len(self.cache):
+        if search_id >= 0 and search_id < len(self.cache):
             chat_id = self.cache[search_id]['chat_id']
             message_id = self.cache[search_id]['message_id']
             results = self.cache[search_id]['results']
@@ -520,31 +555,73 @@ u"""<b>{{ item.name | e }}</b> - {{ "%0.2f" | format(item.done*100) }}% done
     @gen.coroutine
     def cmd_status(self, message=None):
         torrents = yield self.manager.get_torrents()
-        logging.info( repr(torrents) )
-        text = [ self.torrent_renderer.render(x) for x in torrents]
+        text = [self.torrent_renderer.render(x) for x in torrents]
         self.bot.send_message(
            to=message['chat']['id'], reply_to_id=message['message_id'], text= "".join(text), extra={'parse_mode': 'HTML'}
         )
         pass
 
     @authorized
-    def cmd_update(self, message=None):
+    @gen.coroutine
+    def cmd_update(self, message):
+        cmd = message['text'].split()
+        if len(cmd)==1:
+            buttons = [
+                {'text': 'Now', 'callback_data': '/update now'},
+                {'text': '15m', 'callback_data': '/update 15'},
+                {'text': '30m', 'callback_data': '/update 30'},
+                {'text': '60m', 'callback_data': '/update 60'},
+                {'text': 'Off', 'callback_data': '/update 0'},
+            ]
+            markup = {'inline_keyboard': [buttons]}
+            yield self.bot.send_message(
+                to=message['chat']['id'], text='Schedule update', extra={'parse_mode': 'HTML'}, markup=markup
+            )
+        else:
+            when = cmd[1]
+            if when=='now':
+                self.do_update(message['chat']['id'])
+            else:
+                minutes = int(when)
+                if self.update_task.is_running():
+                    self.update_task.stop()
+
+                if minutes>0:
+                    self.update_task = PeriodicCallback(self.do_update, minutes*60*1000)
+                    self.update_task.start()
+                    text = 'Schedule updated: Each %d minutes' % minutes
+                else:
+                    text = 'Schedule updated: off'
+
+                self.bot.send_message(
+                    to=message['chat']['id'], text= text
+                )
+            pass
         pass
 
     def show_results(self, search_id, chat_id, message_id, results, start, page_size=3):
         message = 'Sorry, nothing is found'
         markup = None
-        if len(results)>0:
-            data = map( (lambda i: self.search_renderer.render(results[i]) ), range( start-1, min( start+page_size-1, len(results)) ) )
+        if len(results) > 0:
+            data = map(
+                (lambda i: self.search_renderer.render(results[i])),
+                range(start-1, min(start+page_size-1, len(results)))
+            )
             message = u"\n".join(data)
 
-            buttons=[]
+            buttons = []
             if start>page_size:
-                buttons.append( {'text': "Prev %d/%d" % (page_size, start-1), 'callback_data': '/show %d %d'%(search_id, start-page_size)} )
+                buttons.append({
+                    'text': "Prev %d/%d" % (page_size, start-1),
+                    'callback_data': '/show %d %d' % (search_id, start-page_size)
+                })
             if (start+page_size) < len(results):
-                buttons.append( {'text': "Next %d/%d" % (page_size, len(results)-start-page_size+1), 'callback_data': '/show %d %d'%(search_id, start+page_size)} )
+                buttons.append({
+                    'text': "Next %d/%d" % (page_size, len(results)-start-page_size+1),
+                    'callback_data': '/show %d %d' % (search_id, start+page_size)
+                })
     
-            if len(buttons)>0:
+            if len(buttons) > 0:
                 markup = {'inline_keyboard': [buttons]}
 
         self.bot.edit_message(
@@ -632,23 +709,45 @@ u"""<b>{{ item.name | e }}</b> - {{ "%0.2f" | format(item.done*100) }}% done
         pass
 
     @gen.coroutine
-    def do_update(self):
-        """
+    def do_update(self, reply_chat_id=None):
+        chat_id = reply_chat_id or self.bot.admins[0]
+        updated = False
         torrents = yield self.manager.get_torrents()
+
         for torrent in torrents:
-            logging.info( "Checking updates of \"%s\"", torrent['name'] )
-            torrent_data = self._download_torrent(torrent['url'], torrent['info_hash'])
-            if torrent_data!=None:
-                self.manager.add_torrent(torrent_data, torrent)
-            pass"""
+            url = torrent['url']
+            logging.info('Checking updates for %s', url)
+            for tracker in self.trackers:
+                if tracker.check_url(url):
+                    logging.debug('Download using %s', tracker.__class__)
+                    try:
+                        torrent_data = yield tracker.download(url)
+                        added = yield self.manager.add_torrent(torrent_data, torrent)
+                        if added:
+                            updated = True
+                            yield self.bot.send_message(
+                                to=chat_id,
+                                text='Torrent "%s" updated'%torrent['name']
+                            )
+                    except:
+                        logging.exception('Error while check updates')
+                    continue
+            pass
+
+        if not updated and reply_chat_id is not None:
+            yield self.bot.send_message(
+                to=chat_id,
+                text='No updates'
+            )
         pass
         
 
 def main():
+    import shlex
     class LoadFromFile( argparse.Action ):
-        def __call__(self, parser, namespace, values, option_string = None):
+        def __call__(self, parser, namespace, values, option_string=None):
            with values as f:
-               parser.parse_args(f.read().split(), namespace)
+               parser.parse_args(shlex.split(f.read()), namespace)
 
     parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
 
@@ -676,10 +775,10 @@ def main():
         filename=params.logfile
     )
     # Configure tracker global params
-    TrackerHelper.init( params.cookies, params.timeout, params.path )
+    TrackerHelper.init(params.cookies, params.timeout, params.path)
 
     trackers = [ TrackerHelper.subclass_for(url)(url, params.proxy)  for url in params.helper if TrackerHelper.subclass_for(url) is not None ]
-    logging.info( "tracker support loaded: %s", ",".join([str(tr.name) for tr in trackers]) )
+    logging.info("tracker support loaded: %s", ",".join([str(tr.name) for tr in trackers]))
     for tracker in trackers:
         tracker.login()
 

@@ -19,8 +19,6 @@ setuptools.setup(
         "Operating System :: OS Independent",
     ],
     install_requires=[
-       'requests>=2.10.0',
-       'pysocks',
        'paho_mqtt',
        'asyncmqtt',
        'asynctelebot',
