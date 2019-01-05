@@ -109,7 +109,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
     @authorized
     def cmd_video(self, message=None):
         params = message['text'].split()
-        video = params[1] if len(params)>1 else None
+        video = params[1] if len(params) > 1 else None
 
         if video is None:
             files = sorted([x for x in os.listdir('/home/hub/motion')

@@ -565,7 +565,7 @@ u"""<b>{{ item.name | e }}</b> - {{ "%0.2f" | format(item.done*100) }}% done
     @gen.coroutine
     def cmd_update(self, message):
         cmd = message['text'].split()
-        if len(cmd)==1:
+        if len(cmd) == 1:
             buttons = [
                 {'text': 'Now', 'callback_data': '/update now'},
                 {'text': '15m', 'callback_data': '/update 15'},
