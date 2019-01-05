@@ -149,9 +149,19 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
     @gen.coroutine
     def cmd_track(self, message):
         cmd = message['text'].split()
-        if len(cmd) == 1:
+        has_file = False
+        mask = ''
+        if len(cmd) > 1:
+            try:
+                os.stat(cmd[1])
+                has_file = True
+            except:
+                mask = cmd[1]
+                pass
+
+        if not has_file:
             files = sorted([x for x in os.listdir('.')
-                            if re.match('.*\.gpx', x)], reverse=True)[:5]
+                            if re.match('.*%s.*\.gpx' % mask, x)], reverse=True)[:10]
 
             buttons = [[{
                 'callback_data': '/track '+fname,
