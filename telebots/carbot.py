@@ -1,3 +1,5 @@
+import os
+import re
 import logging
 import argparse
 import urlparse
@@ -10,6 +12,7 @@ import gpxpy.geo
 from cStringIO import StringIO
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 from asynctelebot.telebot import Bot, BotRequestHandler, authorized
 from jinja2 import Environment, Template
 import humanize
@@ -22,29 +25,89 @@ def json_serial(obj):
     raise TypeError("Type %s is not serializable" % type(obj))
 
 
+def encode_number(num):
+    num = num << 1
+    if num < 0:
+      num = ~num
+    encoded = ''
+    while num >= 0x20:
+       encoded = encoded + chr( (0x20 | (num & 0x1f)) + 63)
+       num = num >> 5
+    return encoded + chr(num + 63)
+
+
+def display_gpx(gpx):
+    namespace = {
+        'lat_start': None,
+        'lon_start': None,
+        'lat_end': None,
+        'lon_end': None,
+        'lat_min': None,
+        'lon_min': None,
+        'lat_max': None,
+        'lon_max': None
+    }
+    encoded = ''
+    old_lat = 0
+    old_lon = 0
+
+    for tr in gpx.tracks:
+        for seg in tr.segments:
+            for p in seg.points:
+                if namespace['lat_min'] is None or namespace['lat_min'] > p.latitude:
+                    namespace['lat_min'] = p.latitude
+                if namespace['lat_max'] is None or namespace['lat_max'] < p.latitude:
+                    namespace['lat_max'] = p.latitude
+                if namespace['lon_min'] is None or namespace['lon_min'] > p.longitude:
+                    namespace['lon_min'] = p.longitude
+                if namespace['lon_max'] is None or namespace['lon_max'] < p.longitude:
+                    namespace['lon_max'] = p.longitude
+
+                if namespace['lat_start'] is None:
+                    namespace['lat_start'] = p.latitude
+                    namespace['lon_start'] = p.longitude
+
+                namespace['lat_end'] = p.latitude
+                namespace['lon_end'] = p.longitude
+
+                #ecenter = '%f,%f' % (p.latitude, p.longitude)
+                lat = int(p.latitude * 100000)
+                lon = int(p.longitude * 100000)
+                encoded = encoded + encode_number(lat - old_lat) + encode_number(lon - old_lon)
+                old_lat = lat
+                old_lon = lon
+                pass
+    namespace['shape'] = encoded
+    return namespace
+
+
 class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
-    def __init__(self, ioloop, url, name):
+    def __init__(self, ioloop, url, name, api_key=None):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.url = url
         self.devices = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: None)))
         self.ioloop = ioloop
         self.name = name
-        self.low_battery = (10,15)
+        self.low_battery = (10, 15)
+        self.api_key = api_key
+        self.track2img = 'https://open.mapquestapi.com/staticmap/v4/getmap?key={api_key}&size=600,600&type=map&imagetype=png&declutter=true&shapeformat=cmp&shape={shape}&bestfit={lat_min},{lon_min},{lat_max},{lon_max}&scalebar=false&scenter={lat_start},{lon_start}&ecenter={lat_end},{lon_end}'
+        self.client = AsyncHTTPClient()
 
         self.tz_offset = datetime.timedelta(hours=3)
         self.msg_expire_delta = datetime.timedelta(minutes=15)
         self.jinja = Environment()
         self.jinja.filters['human_date'] = self.human_date
-        self.activity_check_interval = datetime.timedelta( seconds=323 )
+        self.activity_check_interval = datetime.timedelta(seconds=323)
 
-        self.ioloop.add_timeout(  datetime.timedelta(seconds=15), self.activity_job )
+        self.ioloop.add_timeout(datetime.timedelta(seconds=15), self.activity_job)
 
-        mqtt.TornadoMqttClient.__init__(self, 
-             ioloop = ioloop,
-             host = url.hostname, 
-             port = url.port if url.port!=None else 1883,
-             username = url.username,
-             password = url.password
+        mqtt.TornadoMqttClient.__init__(
+            self,
+            ioloop = ioloop,
+            host = url.hostname,
+            port = url.port if url.port!=None else 1883,
+            username = url.username,
+            password = url.password
         )
         pass
 
@@ -53,43 +116,89 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
         chat_id = self.bot.admins[0]
         try:
             for device in self.devices:
-                 status = self.devices[device]['status']
-                 if 'location_date' in status:
-                     is_signal_lost = (datetime.datetime.now()-status['location_date']).total_seconds() >= 25*60*60
-                     prev_signal_lost = status['lost'] or False
-                     if is_signal_lost:
-                         if not prev_signal_lost:
-                             msg = '<b>WARN</b> last message from %s is %s' % (device, self.human_date(status['location_date']))
-                             self.logger.warn( msg )
+                status = self.devices[device]['status']
+                if 'location_date' in status:
+                    is_signal_lost = (datetime.datetime.now()-status['location_date']).total_seconds() >= 25*60*60
+                    prev_signal_lost = status['lost'] or False
+                    if is_signal_lost:
+                        if not prev_signal_lost:
+                            msg = '<b>WARN</b> last message from %s is %s' % (device, self.human_date(status['location_date']))
+                            self.logger.warn( msg )
 
-                             self.bot.send_message(to=chat_id, text = msg, extra={'parse_mode':'HTML'} )
-                             self.cmd_info(None)
-                             self.bot.send_message(to=chat_id, latitude=status['location'][0], longitude=status['location'][1] )
-                     else:
-                         if prev_signal_lost:
-                             msg = '<b>NORM</b> signal from %s is catched now' % device
-                             self.logger.warn( msg )
-                             self.bot.send_message(to=chat_id, text = msg, extra={'parse_mode':'HTML'} )
-                             self.cmd_info(None)
-                             self.bot.send_message(to=chat_id, latitude=status['location'][0], longitude=status['location'][1] )
-                     status['lost']  = is_signal_lost
-                 pass
-        except:
+                            self.bot.send_message(to=chat_id, text = msg, extra={'parse_mode':'HTML'} )
+                            self.cmd_info(None)
+                            self.bot.send_message(to=chat_id, latitude=status['location'][0], longitude=status['location'][1] )
+                    else:
+                        if prev_signal_lost:
+                            msg = '<b>NORM</b> signal from %s is cached now' % device
+                            self.logger.warn( msg )
+                            self.bot.send_message(to=chat_id, text = msg, extra={'parse_mode':'HTML'} )
+                            self.cmd_info(None)
+                            self.bot.send_message(to=chat_id, latitude=status['location'][0], longitude=status['location'][1] )
+                    status['lost'] = is_signal_lost
+                pass
+        except Exception:
             self.logger.exception("Exception in activity job")
-        self.ioloop.add_timeout(self.activity_check_interval, self.activity_job )
+        self.ioloop.add_timeout(self.activity_check_interval, self.activity_job)
         return
 
     def human_date(self, value):
         return humanize.naturaltime(value)
 
     @authorized
+    @gen.coroutine
+    def cmd_track(self, message):
+        cmd = message['text'].split()
+        if len(cmd) == 1:
+            files = sorted([x for x in os.listdir('.')
+                            if re.match('.*\.gpx', x)], reverse=True)[:5]
+
+            buttons = [[{
+                'callback_data': '/track '+fname,
+                'text': fname
+            }] for fname in files]
+
+            yield self.bot.send_message(
+                to=message['chat']['id'],
+                text='which track?',
+                markup={'inline_keyboard': buttons}
+            )
+        else:
+            image = yield self.track_to_image(cmd[1])
+            # send image
+            yield self.bot.send_message(
+                to=message['chat']['id'],
+                photo=('image.png', StringIO(image), 'image/png'),
+                extra={'caption': cmd[1]}
+            )
+            pass
+        pass
+
+    @gen.coroutine
+    def track_to_image(self, gpx_file):
+        with open(gpx_file, "r") as infile:
+            gpx = gpxpy.parse(infile)
+            data = display_gpx(gpx)
+            data['api_key'] = self.api_key
+            url = self.track2img.format(**data)
+            logging.debug(url)
+
+            response = yield self.client.fetch(url, raise_error=False)
+            logging.debug("Response code: %d %s", response.code, response.reason)
+            logging.debug("%s", str(response.headers))
+            response.rethrow()
+            raise gen.Return(response.body)
+            pass
+
+    @authorized
     def cmd_debug(self, message=None):
         chat_id = message['chat']['id'] if message is not None else self.bot.admins[0]
 
-        buffer = StringIO( json.dumps(self.devices, indent=2, sort_keys=True, default=json_serial) )
-        return self.bot.send_message( to=chat_id,
-            document=( 'debug.txt', buffer, 'text/plain'),
-            extra={ 'caption': 'debug info' }
+        buf = StringIO( json.dumps(self.devices, indent=2, sort_keys=True, default=json_serial) )
+        return self.bot.send_message(
+            to=chat_id,
+            document=('debug.txt', buf, 'text/plain'),
+            extra={'caption': 'debug info'}
         )
 
     @authorized
@@ -113,7 +222,7 @@ signal: {{info.location.src}} {{info.location.sat}}
 
 {% endfor %}
 """)
-        devices = { name:data for name, data in self.devices.iteritems() if device is None or name==device}
+        devices = {name: data for name, data in self.devices.iteritems() if device is None or name==device}
         return self.bot.send_message(
                    to=chat_id,
                    text=template.render(devices=devices),
@@ -127,15 +236,15 @@ signal: {{info.location.src}} {{info.location.sat}}
             chat_id = message['chat']['id']
 
         for device, data in self.devices.iteritems():
-             self.bot.send_message(
+            self.bot.send_message(
                  to=chat_id,
                  latitude=data['location']['lat'],
                  longitude=data['location']['lon']
-             )
+            )
 
     def on_mqtt_connect(self, client, userdata, flags, rc):
         self.logger.info("MQTT broker connection result: %s", mqtt.connack_string(rc) )
-        if rc==0:
+        if rc == 0:
             client.subscribe("owntracks/%s/+" % self.name, 0)
         pass
 
@@ -143,12 +252,12 @@ signal: {{info.location.src}} {{info.location.sat}}
         self.devices[device][payload['_type']].update( payload )
 
     def on_track(self, device, event_time, payload):
-        filename = "%s-%s.gpx" % (device, event_time.strftime("%Y_%m_%d-%H_%M") )
+        filename = "%s-%s.gpx" % (device, event_time.strftime("%Y_%m_%d-%H_%M"))
         self.logger.info("Storing track to %s", filename)
 
-        gpx = self.track2gpx( payload["track"] )
-        f = open( filename, "wb" )
-        f.write( gpx.to_xml() )
+        gpx = self.track2gpx(payload["track"])
+        f = open(filename, "wb")
+        f.write(gpx.to_xml())
         f.close()
         pass    
 
@@ -157,7 +266,7 @@ signal: {{info.location.src}} {{info.location.sat}}
         pass    
 
     def on_location(self, device, event_time, payload):
-        self.logger.info( "Location for %s received", device )
+        self.logger.info("Location for %s received", device)
         chat_id = self.bot.admins[0]
 
         battery = payload['batt']
@@ -260,24 +369,27 @@ def main():
            with values as f:
                parser.parse_args(f.read().split(), namespace)
 
-    parser = argparse.ArgumentParser( fromfile_prefix_chars='@' )
+    parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
     parser.add_argument( "-c", "--config", type=open, action=LoadFromFile, help="Load config from file" )
     parser.add_argument( "-n", "--name", default="+" )
     parser.add_argument("--token", help="Telegram API bot token")
-    parser.add_argument("--admin", nargs="+", help="Bot admin",
-                       type=int, dest="admins")
+    parser.add_argument("--key", help="MapQuest API key")
+    parser.add_argument("--admin", nargs="+", help="Bot admin", type=int, dest="admins")
     parser.add_argument( "-u","--url", default="mqtt://localhost:1883", type=urlparse.urlparse )
     parser.add_argument( "-v", action="store_true", default=False, help="Verbose logging", dest="verbose" )
     parser.add_argument( "--logfile", help="Logging into file" )
     args = parser.parse_args()
 
-    logging.basicConfig( format="[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",  level= logging.DEBUG if args.verbose else logging.INFO, filename=args.logfile )
-
+    logging.basicConfig(
+        format="[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",
+        level= logging.DEBUG if args.verbose else logging.INFO,
+        filename=args.logfile
+    )
 
     ioloop = IOLoop.instance()
-    bot = Bot(args.token, args.admins)
 
-    monitor = CarMonitor( ioloop, args.url, args.name )
+    bot = Bot(args.token, args.admins)
+    monitor = CarMonitor(ioloop, args.url, args.name, args.key)
     bot.addHandler(monitor)
 
     monitor.start()
@@ -291,5 +403,5 @@ def main():
        pass
     pass
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()

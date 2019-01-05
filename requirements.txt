@@ -3,3 +3,5 @@ lxml
 cssselect
 tornado
 jinja2
+gpxpy
+humanize
