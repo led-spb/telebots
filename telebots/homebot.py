@@ -6,20 +6,19 @@ import os.path
 import logging
 import argparse
 import time
-import json
 import urlparse
 import asyncmqtt.client as mqtt
 from cStringIO import StringIO
 from asynctelebot.telebot import Bot, BotRequestHandler, authorized
 from tornado import gen
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 from tornado.httpclient import AsyncHTTPClient
 
 
 class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
     def __init__(self, ioloop, mqtt_url, sensors=None, cameras=None):
-        self.logger  = logging.getLogger(self.__class__.__name__)
-        self.ioloop  = ioloop
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.ioloop = ioloop
         self.sensors = sensors or []
         self.cameras = cameras or []
         self.event_gap = 300
@@ -33,12 +32,9 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
                          (host, port))
 
         self.subscribe = False
-        mqtt.TornadoMqttClient.__init__(self, 
-             ioloop = ioloop,
-             host = mqtt_url.hostname, 
-             port = mqtt_url.port if mqtt_url.port!=None else 1883,
-             username = mqtt_url.username,
-             password = mqtt_url.password
+        mqtt.TornadoMqttClient.__init__(
+            self, ioloop=ioloop, host=mqtt_url.hostname, port=mqtt_url.port if mqtt_url.port is not None else 1883,
+            username=mqtt_url.username, password=mqtt_url.password
         )
         pass
 
@@ -125,17 +121,16 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
                 ] if len(x) > 0
             ]
             return self.bot.send_message(
-                       to = message['chat']['id'],
+                       to=message['chat']['id'],
                        text='which video?',
                        markup={'inline_keyboard': keyboard}
             )
 
         caption = re.sub('^\d{8}_(\d{2})(\d{2}).*$', '\\1:\\2', video)
         return self.bot.send_message(
-                   to = message['chat']['id'],
-                   video = ('video.mp4', open('/home/hub/motion/'+video, 'rb'), 'video/mp4'),
-                   extra = {'caption': caption}
-                   
+                   to=message['chat']['id'],
+                   video=('video.mp4', open('/home/hub/motion/'+video, 'rb'), 'video/mp4'),
+                   extra={'caption': caption}
         )
     
     def event_camera(self, path, payload):
@@ -165,17 +160,16 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
             self.subscribe = False
             for chat_id in self.bot.admins:
                 self.bot.send_message(
-                   to=chat_id, video= ('video.mp4', StringIO(payload), 'video/mp4')
+                   to=chat_id, video=('video.mp4', StringIO(payload), 'video/mp4')
                 )
         pass
-    
 
     def event_notify(self, path, payload):
         self.logger.info("Event notify")
         for chat_id in self.bot.admins:
             self.bot.send_message(
                 to=chat_id, text=payload
-            );
+            )
         pass
 
     def event_sensor(self, path, payload):
@@ -195,8 +189,6 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
 
 
 def main():
-    logging.getLogger("requests").setLevel(logging.ERROR)
-    logging.getLogger("urllib3").setLevel(logging.ERROR)
 
     class LoadFromFile(argparse.Action):
         def __call__(self, parser, namespace, values, option_string=None):
@@ -206,26 +198,18 @@ def main():
     parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
 
     basic = parser.add_argument_group('basic', 'Basic parameters')
-    basic.add_argument("-c", "--config", type=open,
-                       action=LoadFromFile,
-                       help="Load config from file")
-    basic.add_argument("-u", "--url",
-                       default="localhost:1883",
-                       type=urlparse.urlparse,
+    basic.add_argument("-c", "--config", type=open, action=LoadFromFile, help="Load config from file")
+    basic.add_argument("-u", "--url", default="mqtt://localhost:1883", type=urlparse.urlparse,
                        help="MQTT Broker address host:port")
     basic.add_argument("--token", help="Telegram API bot token")
-    basic.add_argument("--admin", nargs="+", help="Bot admin",
-                       type=int, dest="admins")
+    basic.add_argument("--admin", nargs="+", help="Bot admin", type=int, dest="admins")
     basic.add_argument("--proxy")
     basic.add_argument("--logfile", help="Logging into file")
-    basic.add_argument("-v", action="store_true",
-                       default=False, help="Verbose logging", dest="verbose")
+    basic.add_argument("-v", action="store_true", default=False, help="Verbose logging", dest="verbose")
 
     status = parser.add_argument_group('status', 'Home state parameters')
-    status.add_argument("--sensors", nargs="*",
-                        help="Notify state of this sensors", type=str)
-    status.add_argument("--cameras", nargs="*",
-                        help="Notify state of this camera", type=str)
+    status.add_argument("--sensors", nargs="*", help="Notify state of this sensors")
+    status.add_argument("--cameras", nargs="*", help="Notify state of this camera")
 
     args = parser.parse_args()
 
@@ -250,11 +234,9 @@ def main():
     bot.loop_start()
     handler.start()
     try:
-       ioloop.start()
-    except KeyboardInterrupt, e:
-       ioloop.stop()
-    finally:
-       pass
+        ioloop.start()
+    except KeyboardInterrupt:
+        ioloop.stop()
     pass
 
 

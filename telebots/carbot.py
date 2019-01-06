@@ -35,7 +35,10 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
         self.name = name
         self.low_battery = (10, 15)
         self.api_key = api_key
-        self.track2img = 'https://open.mapquestapi.com/staticmap/v4/getmap?key={api_key}&size=600,600&type=map&imagetype=png&declutter=true&shapeformat=cmp&shape={shape}&bestfit={lat_min},{lon_min},{lat_max},{lon_max}&scalebar=false&scenter={lat_start},{lon_start}&ecenter={lat_end},{lon_end}'
+        self.track2img = 'https://open.mapquestapi.com/staticmap/v4/getmap?key={api_key}&size=600,600&'\
+                         'type=map&imagetype=png&declutter=true&shapeformat=cmp&shape={shape}&'\
+                         'bestfit={lat_min},{lon_min},{lat_max},{lon_max}&scalebar=false&'\
+                         'scenter={lat_start},{lon_start}&ecenter={lat_end},{lon_end}'
         self.client = AsyncHTTPClient()
 
         self.tz_offset = datetime.timedelta(hours=3)
@@ -69,7 +72,8 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
                     prev_signal_lost = status['lost'] or False
                     if is_signal_lost:
                         if not prev_signal_lost:
-                            msg = '<b>WARN</b> last message from %s is %s' % (device, self.human_date(status['location_date']))
+                            msg = '<b>WARN</b> last message from %s is %s' % \
+                                  (device, self.human_date(status['location_date']))
                             self.logger.warn(msg)
 
                             yield self.bot.send_message(to=chat_id, text=msg, extra={'parse_mode': 'HTML'})
@@ -115,7 +119,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
             }] for fname in files]
             yield self.bot.send_message(
                 to=message['chat']['id'],
-                text='which track?',
+                text='which track?' if len(files) > 0 else 'No tracks',
                 markup={'inline_keyboard': buttons}
             )
         else:
@@ -169,7 +173,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
 {% for device, info in devices.iteritems() %}
 <b>{{device}}</b>
 power: {{info.location.batt}}%
-igninion: {{ 'on' if info.status.charge>0 else 'off' }}
+ignition: {{ 'on' if info.status.charge>0 else 'off' }}
 temperature: {{info.location.temp}}
 distance move: {{info.status.distance}}m
 last location: {{info.status.location_date | human_date }}

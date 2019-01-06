@@ -19,27 +19,34 @@ from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado import gen
 from asynctelebot.telebot import Bot, BotRequestHandler, authorized
-from jinja2 import Environment, Template
+from jinja2 import Environment
 
 
-class Renderer():
+class Renderer(object):
 
     def __init__(self, template=None):
         self.jinja2 = Environment()
         self.jinja2.filters['datetimeformat'] = self._datetimeformat
         self.jinja2.filters['todatetime'] = self._todatetime
         if template is not None:
-            self.set_template(template)
+            self.template = template
 
-    def set_template(self, template):
-        self.template = self.jinja2.from_string(template)
+    @property
+    def template(self):
+        return self._template
 
-    def _datetimeformat(self, value, format='%d-%m-%Y %H:%M:%s'):
+    @template.setter
+    def template(self, value):
+        self._template = self.jinja2.from_string(value)
+
+    @staticmethod
+    def _datetimeformat(value, format='%d-%m-%Y %H:%M:%s'):
         return value.strftime(format)
 
-    def _todatetime(self, value):
+    @staticmethod
+    def _todatetime(value):
         return datetime.fromtimestamp(int(value))
-         
+
     def render(self, item):
         return self.template.render(item=item)
 
@@ -47,7 +54,7 @@ class Renderer():
 class ResultItem:
     __attributes__ = ['id', 'title', 'category', 'link', 'added', 'size']
 
-    def __init__(self, **kwargs ):
+    def __init__(self, **kwargs):
         self.__data__ = kwargs
         pass
 
@@ -67,10 +74,10 @@ class TrackerHelper(object):
 
     @staticmethod
     def init(cookie, timeout, path):
-        TrackerHelper.cookies = cookielib.MozillaCookieJar( cookie )
+        TrackerHelper.cookies = cookielib.MozillaCookieJar(cookie)
         try:
-            TrackerHelper.cookies.load( ignore_discard=True, ignore_expires=True )
-        except Exception,e:
+            TrackerHelper.cookies.load(ignore_discard=True, ignore_expires=True)
+        except Exception:
             pass
         TrackerHelper.timeout = timeout
         TrackerHelper.torrent_path = path
@@ -79,8 +86,8 @@ class TrackerHelper(object):
     @staticmethod
     def finish():
         try:
-            TrackerHelper.cookies.save( ignore_discard=True, ignore_expires=True )
-        except Exception, e:
+            TrackerHelper.cookies.save(ignore_discard=True, ignore_expires=True)
+        except Exception:
             pass
         return
 
@@ -101,8 +108,9 @@ class TrackerHelper(object):
 
         self.cookies = TrackerHelper.cookies
         self.headers = {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/29.0.1547.66 Safari/537.36',
-              'Accept-Charset': 'utf-8'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) '
+                          'Chrome/29.0.1547.66 Safari/537.36',
+            'Accept-Charset': 'utf-8'
         }
         self.proxies = {}
         if proxy is not None:
@@ -113,11 +121,10 @@ class TrackerHelper(object):
         pass
 
     def check_url(self, url):
-        names = [self.name] if not isinstance(self.name,list) else self.name
+        names = [self.name] if not isinstance(self.name, list) else self.name
         for name in names:
             if re.search('^http://%s' % name, url) is not None:
                 return True
-        #return re.search("^%s" % self.base_url, url) is not None
         return False
 
     def download(self, url):
@@ -130,18 +137,18 @@ class TrackerHelper(object):
 class NonameClub(TrackerHelper):
     name = ["nnm-club.me", "nnmclub.to"]
 
-    def __init__(self, url, proxy ):
-        TrackerHelper.__init__(self, url, proxy )
+    def __init__(self, url, proxy):
+        TrackerHelper.__init__(self, url, proxy)
         self.isAuth = False
         self.sid = None
         self.client = AsyncHTTPClient()
         pass
 
-    def check_auth( self, body):
-        #f = open("login.dat","w")
-        #f.write(body)
-        #f.close()
-        m = re.search( '<a\s+href="login\.php\?logout=true&amp;sid=(.*?)"', body, re.I+re.M )
+    def check_auth(self, body):
+        # f = open("login.dat","w")
+        # f.write(body)
+        # f.close()
+        m = re.search('<a\s+href="login\.php\?logout=true&amp;sid=(.*?)"', body, re.I + re.M)
         status = False
         if m is not None:
             self.sid = m.group(1)
@@ -158,35 +165,35 @@ class NonameClub(TrackerHelper):
         logging.info("Initial connect to %s", self.base_url)
         request = HTTPRequest(
             url,
-            headers = self.headers,
-            method = 'GET',
+            headers=self.headers,
+            method='GET',
             connect_timeout=5, request_timeout=20
         )
-        response = yield self.client.fetch(request, raise_error = False)
+        response = yield self.client.fetch(request, raise_error=False)
         logging.info("Response code: %d %s", response.code, response.reason)
         logging.debug("%s", str(response.headers))
         response.rethrow()
 
-        m = re.search('<form.*?action="login.php".*?>(.*?)</form>', response.body, re.I+re.M+re.U+re.S)
+        m = re.search('<form.*?action="login.php".*?>(.*?)</form>', response.body, re.I + re.M + re.U + re.S)
         form = m.group(1)
-        login_data = { 
-           'login': u'Вход'.encode('windows-1251'),
-           'username': self.user, 'password': self.passwd,
-           'autologin':'on' 
+        login_data = {
+            'login': u'Вход'.encode('windows-1251'),
+            'username': self.user, 'password': self.passwd,
+            'autologin': 'on'
         }
-        for m in re.finditer(r'<input\s+type="hidden"\s+name="(.*?)"\s+value="(.*?)"', form, re.I+re.M+re.S ):
-            login_data[ m.group(1) ] = m.group(2)
+        for m in re.finditer(r'<input\s+type="hidden"\s+name="(.*?)"\s+value="(.*?)"', form, re.I + re.M + re.S):
+            login_data[m.group(1)] = m.group(2)
 
         request = HTTPRequest(
-            url, headers=self.headers , method='POST', body=urllib.urlencode(login_data),
+            url, headers=self.headers, method='POST', body=urllib.urlencode(login_data),
             connect_timeout=5, request_timeout=60
         )
-        logging.info("Passing credentinals to %s", self.base_url)
-        response = yield self.client.fetch( request, raise_error = False )
+        logging.info("Passing credentials to %s", self.base_url)
+        response = yield self.client.fetch(request, raise_error=False)
         logging.info("Response code: %d %s", response.code, response.reason)
 
         response.rethrow()
-        self.isAuth = self.check_auth( response.body )
+        self.isAuth = self.check_auth(response.body)
         if not self.isAuth:
             raise Exception("Could not login to %s", self.base_url)
         logging.info("Login to %s successfully, sid %s", self.base_url, self.sid)
@@ -198,22 +205,21 @@ class NonameClub(TrackerHelper):
         if not self.isAuth or self.sid is None:
             self.login()
 
-        m = re.search("viewtopic.php\\?(?:t|p)=(\\d+)", url)
-        torrent = m.group(1)
+        # m = re.search("viewtopic.php\\?[tp]=(\\d+)", url)
+        # torrent = m.group(1)
 
         logging.info("Start download %s", url)
         request = HTTPRequest(
-            url+'&sid=%s'%self.sid,
-            headers = self.headers,
-            method = 'GET',
+            url + '&sid=%s' % self.sid,
+            headers=self.headers,
+            method='GET',
             connect_timeout=5, request_timeout=20
         )
-        response = yield self.client.fetch(request, raise_error = False)
+        response = yield self.client.fetch(request, raise_error=False)
         logging.debug("Response code: %d %s", response.code, response.reason)
         response.rethrow()
 
-        download_id = None
-        match = re.search( "<a href=\"download.php\\?id=(\\d+)", response.body, re.I+re.M )
+        match = re.search("<a href=\"download.php\\?id=(\\d+)", response.body, re.I + re.M)
         if match:
             download_id = match.group(1)
         else:
@@ -225,11 +231,11 @@ class NonameClub(TrackerHelper):
         logging.debug("Start download %s", url)
         request = HTTPRequest(
             url,
-            headers = self.headers,
-            method = 'GET',
+            headers=self.headers,
+            method='GET',
             connect_timeout=5, request_timeout=20
         )
-        response = yield self.client.fetch(request, raise_error = False)
+        response = yield self.client.fetch(request, raise_error=False)
         logging.debug("Response code: %d %s", response.code, response.reason)
         response.rethrow()
         raise gen.Return(response.body)
@@ -237,17 +243,17 @@ class NonameClub(TrackerHelper):
 
     @gen.coroutine
     def do_search(self, query):
-        if query is None or query.strip()=='':
+        if query is None or query.strip() == '':
             raise gen.Return([])
 
         url = "%sforum/tracker.php" % self.base_url
         request = HTTPRequest(
-                url,
-                headers = self.headers,
-                method = 'POST', 
-                body = urllib.urlencode({
-                  'f': u'-1', 'nm': query.encode('windows-1251'),'submit_search': u'Поиск'.encode('windows-1251'),
-                }), connect_timeout=5, request_timeout=10
+            url,
+            headers=self.headers,
+            method='POST',
+            body=urllib.urlencode({
+                'f': u'-1', 'nm': query.encode('windows-1251'), 'submit_search': u'Поиск'.encode('windows-1251'),
+            }), connect_timeout=5, request_timeout=10
         )
         logging.debug("Make request to %s", url)
         response = yield self.client.fetch(request, raise_error=False)
@@ -275,7 +281,7 @@ class NonameClub(TrackerHelper):
         m = re.search('\?t=(.*)$', href)
         item_id = m.group(1)
 
-        title    = cells[2].text_content().strip()
+        title = cells[2].text_content().strip()
         category = cells[1].text_content().strip()
 
         size = 0
@@ -286,39 +292,38 @@ class NonameClub(TrackerHelper):
         except:
             pass
 
-        item = ResultItem(id="nnm_"+item_id,
+        item = ResultItem(id="nnm_" + item_id,
                           title=title,
                           category=category,
-                          link=os.path.join(self.base_url,'forum/',href),
+                          link=os.path.join(self.base_url, 'forum/', href),
                           added=added,
                           size=size
-        )
+                          )
         return item
 
 
 class Rutor(TrackerHelper):
     name = "new-rutor.org"
 
-    def __init__(self, url, proxy ):
-        TrackerHelper.__init__(self, url, proxy )
+    def __init__(self, url, proxy):
+        TrackerHelper.__init__(self, url, proxy)
         self.client = AsyncHTTPClient()
         pass
 
-
     @gen.coroutine
     def do_search(self, query):
-        if query.strip()=='':
+        if query.strip() == '':
             raise gen.Return([])
 
-        url = u"%s/search/%s/" % (self.base_url, query )
+        url = u"%s/search/%s/" % (self.base_url, query)
         logging.info("Make request to %s", self.base_url)
         request = HTTPRequest(
-                url,
-                headers = self.headers,
-                method = 'GET', 
-                connect_timeout=5, request_timeout=10
+            url,
+            headers=self.headers,
+            method='GET',
+            connect_timeout=5, request_timeout=10
         )
-        response = yield self.client.fetch( request, raise_error = False )
+        response = yield self.client.fetch(request, raise_error=False)
         try:
             logging.debug("Response code: %d %s", response.code, response.reason)
             response.rethrow()
@@ -326,18 +331,18 @@ class Rutor(TrackerHelper):
             logging.exception("Error making request")
             raise gen.Return([])
 
-        tree = lxml.html.fromstring( response.body )
-        sel = lxml.cssselect.CSSSelector( u"tr.gai,tr.tum" )
+        tree = lxml.html.fromstring(response.body)
+        sel = lxml.cssselect.CSSSelector(u"tr.gai,tr.tum")
         results = []
         for item in sel(tree):
-           results.append( self.parse_result(item) )
+            results.append(self.parse_result(item))
         raise gen.Return(results)
 
     def parse_result(self, element):
         cells = element.cssselect('td')
 
-        href     = cells[1].cssselect('a')[0].attrib['href']
-        link     = self.base_url + href + '/'
+        href = cells[1].cssselect('a')[0].attrib['href']
+        link = self.base_url + href + '/'
 
         m = re.search('(\d+)$', href)
         item_id = m.group(1)
@@ -346,18 +351,18 @@ class Rutor(TrackerHelper):
         category = 'rutor'
         size = cells[3].text_content().strip()
 
-        date_str = cells[0].text_content().strip()
+        # date_str = cells[0].text_content().strip()
         added = None
-        #added    = dateparser.parse( date_str, languages=['ru','en'] )# - datetime.datetime(1970, 1, 1) ).total_seconds() )
-        if added != None:
-            added = (added - datetime.datetime(1970, 1, 1) ).total_seconds()
+        # added = dateparser.parse(date_str, languages=['ru','en'] )# - datetime.datetime(1970, 1, 1) ).total_seconds())
+        if added is not None:
+            added = (added - datetime.datetime(1970, 1, 1)).total_seconds()
         else:
             added = 0
-        return ResultItem(id="_rutor_"+item_id, title=title, category=category, link=link, added=added, size=size)
+        return ResultItem(id="_rutor_" + item_id, title=title, category=category, link=link, added=added, size=size)
 
     @gen.coroutine
     def download(self, url):
-        m=re.search("rutor.org/torrent/(\\d+)", url)
+        m = re.search("rutor.org/torrent/(\\d+)", url)
         torrent = m.group(1)
 
         url = "http://new-rutor.org/parse/d.rutor.org/download/%s/" % torrent
@@ -365,7 +370,7 @@ class Rutor(TrackerHelper):
             url,
             method='GET'
         )
-        response = yield self.client.fetch( request, raise_on_error=False )
+        response = yield self.client.fetch(request, raise_on_error=False)
         response.rethrow()
         raise gen.Return(response.body)
 
@@ -395,7 +400,7 @@ class TransmissionManager(TorrentManager):
 
     def __init__(self, url):
         TorrentManager.__init__(self, url)
-        res = urlparse( url )
+        res = urlparse(url)
 
         self.client = AsyncHTTPClient()
         self.base_url = "http://%s:%d/transmission/rpc" % (res.hostname, res.port)
@@ -409,10 +414,10 @@ class TransmissionManager(TorrentManager):
 
         for i in range(2):
             request = HTTPRequest(
-               self.base_url, method='POST',
-               headers = self.headers,
-               body = json.dumps(params),
-               connect_timeout=5, request_timeout=10
+                self.base_url, method='POST',
+                headers=self.headers,
+                body=json.dumps(params),
+                connect_timeout=5, request_timeout=10
             )
             response = yield self.client.fetch(request, raise_error=False)
             logging.debug(response.body)
@@ -445,7 +450,7 @@ class TransmissionManager(TorrentManager):
                 files.append(f)
 
             info = {
-                'id':  t['id'],
+                'id': t['id'],
                 'name': t['name'],
                 'url': t['comment'].strip(),
                 'error': t['errorString'].strip(),
@@ -463,9 +468,9 @@ class TransmissionManager(TorrentManager):
         info_hash = None
         try:
             # Check downloaded torrent file for correctly and info_hash changed
-            tr_info = bencode.bdecode( torrent_data )
-            info_hash = self.info_hash( tr_info['info'] )
-        except Exception, e:
+            tr_info = bencode.bdecode(torrent_data)
+            info_hash = self.info_hash(tr_info['info'])
+        except Exception:
             logging.exception("Bad torrent file")
 
         if old_torrent_info is not None and old_torrent_info['info_hash'] == info_hash:
@@ -477,28 +482,29 @@ class TransmissionManager(TorrentManager):
         if old_torrent_info is not None:
             unwanted = [k for k, v in old_torrent_info['files'].iteritems() if not v['wanted']]
 
-            response = yield self.request(**{
+            yield self.request(**{
                 'method': 'torrent-add',
                 'metainfo': torrent_data,
                 'download-dir': old_torrent_info['downloadDir'],
                 'files-unwanted': unwanted
             })
 
-            response = yield self.request(
+            yield self.request(
                 method='torrent-remove',
                 ids=[old_torrent_info['id']]
             )
             pass
         else:
-            response = yield self.request(method='torrent-add', metainfo=torrent_data)
+            yield self.request(method='torrent-add', metainfo=torrent_data)
         logging.info("Torrent data updated")
         raise gen.Return(True)
         pass
 
-    def info_hash(self, info):
+    @staticmethod
+    def info_hash(info):
         raw = bencode.bencode(info)
         m = hashlib.sha1()
-        m.update( raw )
+        m.update(raw)
         return m.hexdigest().upper()
 
 
@@ -509,25 +515,25 @@ class UpdateChecker(BotRequestHandler):
         self.trackers = trackers
 
         self.search_renderer = Renderer(
-u"""<b>{{item.title|e}}</b>
+            u"""<b>{{item.title|e}}</b>
 Раздел: {{item.category|e}}
 Размер: {% if item.size | int(-1) == -1 %}{{item.size | e}}{% else %}{{ item.size | default(0) | int | filesizeformat }}{% endif %}
 Добавлено: {{ item.added | default(0) | int | todatetime | datetimeformat('%d-%m-%Y') }}
 Скачать: /download_{{item.id}}
 
 """
-)
+        )
         self.torrent_renderer = Renderer(
-u"""<b>{{ item.name | e }}</b> - {{ "%0.2f" | format(item.done*100) }}% done
+            u"""<b>{{ item.name | e }}</b> - {{ "%0.2f" | format(item.done*100) }}% done
  
 """)
         self.cache = []
-        self.update_task = PeriodicCallback(self.do_update, 15*60*1000)
+        self.update_task = PeriodicCallback(self.do_update, 15 * 60 * 1000)
         pass
 
     def defaultCommand(self):
         return self.entry_point
-    
+
     @authorized
     def entry_point(self, message=None):
         message_text = message['text']
@@ -557,7 +563,8 @@ u"""<b>{{ item.name | e }}</b> - {{ "%0.2f" | format(item.done*100) }}% done
         torrents = yield self.manager.get_torrents()
         text = [self.torrent_renderer.render(x) for x in torrents]
         self.bot.send_message(
-           to=message['chat']['id'], reply_to_id=message['message_id'], text= "".join(text), extra={'parse_mode': 'HTML'}
+            to=message['chat']['id'], reply_to_id=message['message_id'], text="".join(text),
+            extra={'parse_mode': 'HTML'}
         )
         pass
 
@@ -579,22 +586,22 @@ u"""<b>{{ item.name | e }}</b> - {{ "%0.2f" | format(item.done*100) }}% done
             )
         else:
             when = cmd[1]
-            if when=='now':
+            if when == 'now':
                 self.do_update(message['chat']['id'])
             else:
                 minutes = int(when)
                 if self.update_task.is_running():
                     self.update_task.stop()
 
-                if minutes>0:
-                    self.update_task = PeriodicCallback(self.do_update, minutes*60*1000)
+                if minutes > 0:
+                    self.update_task = PeriodicCallback(self.do_update, minutes * 60 * 1000)
                     self.update_task.start()
                     text = 'Schedule updated: Each %d minutes' % minutes
                 else:
                     text = 'Schedule updated: off'
 
                 self.bot.send_message(
-                    to=message['chat']['id'], text= text
+                    to=message['chat']['id'], text=text
                 )
             pass
         pass
@@ -605,22 +612,22 @@ u"""<b>{{ item.name | e }}</b> - {{ "%0.2f" | format(item.done*100) }}% done
         if len(results) > 0:
             data = map(
                 (lambda i: self.search_renderer.render(results[i])),
-                range(start-1, min(start+page_size-1, len(results)))
+                range(start - 1, min(start + page_size - 1, len(results)))
             )
             message = u"\n".join(data)
 
             buttons = []
-            if start>page_size:
+            if start > page_size:
                 buttons.append({
-                    'text': "Prev %d/%d" % (page_size, start-1),
-                    'callback_data': '/show %d %d' % (search_id, start-page_size)
+                    'text': "Prev %d/%d" % (page_size, start - 1),
+                    'callback_data': '/show %d %d' % (search_id, start - page_size)
                 })
-            if (start+page_size) < len(results):
+            if (start + page_size) < len(results):
                 buttons.append({
-                    'text': "Next %d/%d" % (page_size, len(results)-start-page_size+1),
-                    'callback_data': '/show %d %d' % (search_id, start+page_size)
+                    'text': "Next %d/%d" % (page_size, len(results) - start - page_size + 1),
+                    'callback_data': '/show %d %d' % (search_id, start + page_size)
                 })
-    
+
             if len(buttons) > 0:
                 markup = {'inline_keyboard': [buttons]}
 
@@ -656,37 +663,41 @@ u"""<b>{{ item.name | e }}</b> - {{ "%0.2f" | format(item.done*100) }}% done
         query = message['text']
         user_id = message['chat']['id']
 
-        item_id = query.split('_',1)[1]
+        item_id = query.split('_', 1)[1]
         logging.info("Search download url for id=%s", item_id)
         item = None
         for search in self.cache:
             for result in search['results']:
                 if result.id == item_id:
-                   item = result
-                   break
+                    item = result
+                    break
             if item is not None:
                 break
 
         if item is not None:
-           url = item.link
+            url = item.link
 
-           msg = yield self.bot.send_message(to=user_id, text='Downloading...')
-           message_id = json.loads(msg.body)['result']['message_id']
-           try:
-               for tracker in self.trackers:
-                   if tracker.check_url(url):
-                      torrent_data = yield tracker.download(url)
-                      tr_info = bencode.bdecode(torrent_data)
-                      torrent_name = tr_info['info']['name']
+            msg = yield self.bot.send_message(to=user_id, text='Downloading...')
+            message_id = json.loads(msg.body)['result']['message_id']
+            try:
+                for tracker in self.trackers:
+                    if tracker.check_url(url):
+                        torrent_data = yield tracker.download(url)
+                        tr_info = bencode.bdecode(torrent_data)
+                        torrent_name = tr_info['info']['name']
 
-                      result = yield self.manager.add_torrent(torrent_data)
-                      self.bot.edit_message(to=user_id, message_id=message_id, text='Torrent "%s" downloaded' % torrent_name)
-                      break
-           except:
-               logging.exception("Error while download torrent data")
-               self.bot.edit_message(to=user_id, message_id=message_id, text="Sorry, error occured!\n%s" % traceback.format_exc())
+                        yield self.manager.add_torrent(torrent_data)
+                        self.bot.edit_message(
+                            to=user_id, message_id=message_id, text='Torrent "%s" downloaded' % torrent_name
+                        )
+                        break
+            except:
+                logging.exception("Error while download torrent data")
+                self.bot.edit_message(
+                    to=user_id, message_id=message_id, text="Sorry, error occurred!\n%s" % traceback.format_exc()
+                )
         else:
-           logging.warn("Couldn't find download url for id %s", item_id)
+            logging.warn("Couldn't find download url for id %s", item_id)
 
         raise gen.Return()
 
@@ -698,7 +709,7 @@ u"""<b>{{ item.name | e }}</b> - {{ "%0.2f" | format(item.done*100) }}% done
                 'chat_id': chat_id, 'message_id': message_id, 'query': query, 'results': []
             })
         logging.info("Start search_id %d for query \"%s\"", search_id, query)
-        
+
         responses = yield [tracker.do_search(query) for tracker in self.trackers]
         results = []
         for response in responses:
@@ -727,7 +738,7 @@ u"""<b>{{ item.name | e }}</b> - {{ "%0.2f" | format(item.done*100) }}% done
                             updated = True
                             yield self.bot.send_message(
                                 to=chat_id,
-                                text='Torrent "%s" updated'%torrent['name']
+                                text='Torrent "%s" updated' % torrent['name']
                             )
                     except:
                         logging.exception('Error while check updates')
@@ -740,55 +751,57 @@ u"""<b>{{ item.name | e }}</b> - {{ "%0.2f" | format(item.done*100) }}% done
                 text='No updates'
             )
         pass
-        
+
 
 def main():
     import shlex
-    class LoadFromFile( argparse.Action ):
+
+    class LoadFromFile(argparse.Action):
         def __call__(self, parser, namespace, values, option_string=None):
-           with values as f:
-               parser.parse_args(shlex.split(f.read()), namespace)
+            with values as f:
+                parser.parse_args(shlex.split(f.read()), namespace)
 
     parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
 
-    basic = parser.add_argument_group('basic','Basic parameters')
+    basic = parser.add_argument_group('basic', 'Basic parameters')
     basic.add_argument("-c", "--config", type=open, action=LoadFromFile, help="Load config from file")
-    basic.add_argument("--cookies",  default="cookies.dat")
+    basic.add_argument("--cookies", default="cookies.dat")
     basic.add_argument("--timeout", default=10, type=int)
-    basic.add_argument("--token",   help="Telegram API bot token")
-    basic.add_argument("--admin",   nargs="+", help="Bot admin", type=int, dest="admins")
+    basic.add_argument("--token", help="Telegram API bot token")
+    basic.add_argument("--admin", nargs="+", help="Bot admin", type=int, dest="admins")
     basic.add_argument("--logfile", help="Logging into file")
-    basic.add_argument("--tmp",    default=".", dest="path")
+    basic.add_argument("--tmp", default=".", dest="path")
     basic.add_argument("-v", action="store_true", default=False, help="Verbose logging", dest="verbose")
-    basic.add_argument("-m","--manager", dest="manager", default="transmission://127.0.0.1:9091")
+    basic.add_argument("-m", "--manager", dest="manager", default="transmission://127.0.0.1:9091")
 
     download = parser.add_argument_group('download', 'Download helper parameters')
-    download.add_argument("--helper",  action="append", default=[] )
+    download.add_argument("--helper", action="append", default=[])
     download.add_argument("--download-dir", dest="download_dir", default=".")
     download.add_argument("--proxy")
 
     params = parser.parse_args()
 
     logging.basicConfig(
-        format = u'%(asctime)s\t%(process)d\t%(levelname)s\t%(message)s',
-        level = logging.DEBUG if params.verbose else logging.INFO,
+        format=u'%(asctime)s\t%(process)d\t%(levelname)s\t%(message)s',
+        level=logging.DEBUG if params.verbose else logging.INFO,
         filename=params.logfile
     )
     # Configure tracker global params
     TrackerHelper.init(params.cookies, params.timeout, params.path)
 
-    trackers = [ TrackerHelper.subclass_for(url)(url, params.proxy)  for url in params.helper if TrackerHelper.subclass_for(url) is not None ]
+    trackers = [TrackerHelper.subclass_for(url)(url, params.proxy) for url in params.helper if
+                TrackerHelper.subclass_for(url) is not None]
     logging.info("tracker support loaded: %s", ",".join([str(tr.name) for tr in trackers]))
     for tracker in trackers:
         tracker.login()
 
-    manager_class = TorrentManager.subclass_for( params.manager )
+    manager_class = TorrentManager.subclass_for(params.manager)
     if manager_class is None:
         logging.error("Unknown torrent manager scheme")
         exit()
-    manager = manager_class( params.manager )
+    manager = manager_class(params.manager)
 
-    updater = UpdateChecker( manager, trackers )
+    updater = UpdateChecker(manager, trackers)
     ioloop = IOLoop.instance()
 
     bot = Bot(params.token, params.admins, ioloop=ioloop)
@@ -796,15 +809,16 @@ def main():
 
     bot.loop_start()
     try:
-       ioloop.start()
-    except KeyboardInterrupt, e:
-       ioloop.stop()
+        ioloop.start()
+    except KeyboardInterrupt:
+        ioloop.stop()
     finally:
-       pass
+        pass
     pass
 
     TrackerHelper.finish()
     return
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     main()
