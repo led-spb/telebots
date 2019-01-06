@@ -472,6 +472,7 @@ class TransmissionManager(TorrentManager):
             info_hash = self.info_hash(tr_info['info'])
         except Exception:
             logging.exception("Bad torrent file")
+            raise ValueError("Bad torrent file")
 
         if old_torrent_info is not None and old_torrent_info['info_hash'] == info_hash:
             logging.info('No updates')
