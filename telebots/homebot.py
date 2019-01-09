@@ -76,7 +76,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         self.http_client.fetch("http://127.0.0.1:8082/0/action/snapshot")
         return None
 
-    @TextMessageHandler('/sub( .*)', authorized=True)
+    @TextMessageHandler('/sub( .*)?', authorized=True)
     def cmd_sub(self, message):
         args = message['text'].split()
 
@@ -103,7 +103,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
                              data=json.dumps({'template': template})).text
     """
 
-    @TextMessageHandler("/video( .*)", authorized=True)
+    @TextMessageHandler("/video( .*)?", authorized=True)
     def cmd_video(self, message=None):
         params = message['text'].split()
         video = params[1] if len(params) > 1 else None
