@@ -28,6 +28,7 @@ def json_serial(obj):
 class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
 
     def __init__(self, ioloop, url, name, api_key=None):
+        BotRequestHandler.__init__(self)
         self.logger = logging.getLogger(self.__class__.__name__)
         self.url = url
         self.devices = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: None)))

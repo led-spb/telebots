@@ -18,7 +18,7 @@ from urlparse import urlparse
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado import gen
-from asynctelebot.telebot import Bot, BotRequestHandler, authorized
+from asynctelebot.telebot import Bot, BotRequestHandler, TextMessageHandler
 from jinja2 import Environment
 
 
@@ -391,7 +391,7 @@ class TorrentManager(object):
     def get_torrents(self):
         return []
 
-    def add_torrent(self, filename, torrent=None):
+    def add_torrent(self, filename, old_torrent_info=None):
         pass
 
 
@@ -530,19 +530,7 @@ class UpdateChecker(BotRequestHandler):
         self.update_task = PeriodicCallback(self.do_update, 15 * 60 * 1000)
         pass
 
-    def defaultCommand(self):
-        return self.entry_point
-
-    @authorized
-    def entry_point(self, message=None):
-        message_text = message['text']
-        if message_text.startswith('/download'):
-            self.do_download(message)
-        else:
-            self.do_search(message)
-        pass
-
-    @authorized
+    @TextMessageHandler('/show( .*)?', authorized=True)
     def cmd_show(self, message=None):
         data = message['text'].split()
 
@@ -556,7 +544,7 @@ class UpdateChecker(BotRequestHandler):
             self.show_results(search_id, chat_id, message_id, results, start)
         pass
 
-    @authorized
+    @TextMessageHandler('/status', authorized=True)
     @gen.coroutine
     def cmd_status(self, message=None):
         torrents = yield self.manager.get_torrents()
@@ -567,7 +555,7 @@ class UpdateChecker(BotRequestHandler):
         )
         pass
 
-    @authorized
+    @TextMessageHandler('/update( .*)?', authorized=True)
     @gen.coroutine
     def cmd_update(self, message):
         cmd = message['text'].split()
@@ -635,6 +623,7 @@ class UpdateChecker(BotRequestHandler):
         )
         pass
 
+    @TextMessageHandler('[^/].*')
     def do_search(self, message=None):
         query = message['text']
 
@@ -657,6 +646,7 @@ class UpdateChecker(BotRequestHandler):
         )
         pass
 
+    @TextMessageHandler('/download .*')
     @gen.coroutine
     def do_download(self, message=None):
         query = message['text']
@@ -804,7 +794,7 @@ def main():
     ioloop = IOLoop.instance()
 
     bot = Bot(params.token, params.admins, ioloop=ioloop)
-    bot.addHandler(updater)
+    bot.add_handler(updater)
 
     bot.loop_start()
     try:
