@@ -13,7 +13,7 @@ from cStringIO import StringIO
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.httpclient import AsyncHTTPClient
-from asynctelebot.telebot import Bot, BotRequestHandler, authorized
+from asynctelebot.telebot import Bot, BotRequestHandler, TextMessageHandler
 from jinja2 import Environment
 import humanize
 from collections import defaultdict
@@ -96,7 +96,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
             self.logger.exception("Exception in activity job")
         return
 
-    @authorized
+    @TextMessageHandler("/track.*", authorized=True)
     @gen.coroutine
     def cmd_track(self, message):
         cmd = message['text'].split()
@@ -149,7 +149,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
             raise gen.Return(response.body)
             pass
 
-    @authorized
+    @TextMessageHandler("/debug", authorized=True)
     def cmd_debug(self, message=None):
         chat_id = message['chat']['id'] if message is not None else self.bot.admins[0]
 
@@ -160,7 +160,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
             extra={'caption': 'debug info'}
         )
 
-    @authorized
+    @TextMessageHandler("/info.*", authorized=True)
     def cmd_info(self, message=None):
         params = ()
         chat_id = self.bot.admins[0]
@@ -188,7 +188,7 @@ signal: {{info.location.src}} {{info.location.sat}}
                    extra={'parse_mode': 'HTML'}
         )
 
-    @authorized
+    @TextMessageHandler("/location", authorized=True)
     def cmd_location(self, message=None):
         chat_id = self.bot.admins[0]
         if message is not None:
@@ -408,7 +408,7 @@ def main():
 
     bot = Bot(args.token, args.admins)
     monitor = CarMonitor(ioloop, args.url, args.name, args.key)
-    bot.addHandler(monitor)
+    bot.add_handler(monitor)
 
     monitor.start()
     bot.loop_start()

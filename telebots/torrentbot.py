@@ -148,7 +148,7 @@ class NonameClub(TrackerHelper):
         # f = open("login.dat","w")
         # f.write(body)
         # f.close()
-        m = re.search('<a\s+href="login\.php\?logout=true&amp;sid=(.*?)"', body, re.I + re.M)
+        m = re.search(r'<a\s+href="login\.php\?logout=true&amp;sid=(.*?)"', body, re.I + re.M)
         status = False
         if m is not None:
             self.sid = m.group(1)
@@ -174,7 +174,7 @@ class NonameClub(TrackerHelper):
         logging.debug("%s", str(response.headers))
         response.rethrow()
 
-        m = re.search('<form.*?action="login.php".*?>(.*?)</form>', response.body, re.I + re.M + re.U + re.S)
+        m = re.search(r'<form.*?action="login.php".*?>(.*?)</form>', response.body, re.I + re.M + re.U + re.S)
         form = m.group(1)
         login_data = {
             'login': u'Вход'.encode('windows-1251'),
@@ -268,7 +268,7 @@ class NonameClub(TrackerHelper):
             try:
                 res = self.parse_result(item)
                 results.append(res)
-            except:
+            except Exception:
                 logging.exception("Parsing error")
 
         raise gen.Return(results)
@@ -278,7 +278,7 @@ class NonameClub(TrackerHelper):
         cells = element.cssselect('td')
 
         href = cells[2].cssselect('a')[0].attrib['href']
-        m = re.search('\?t=(.*)$', href)
+        m = re.search(r'\?t=(.*)$', href)
         item_id = m.group(1)
 
         title = cells[2].text_content().strip()
@@ -289,7 +289,7 @@ class NonameClub(TrackerHelper):
         try:
             size = int(cells[5].cssselect('u')[0].text_content().strip())
             added = int(cells[9].cssselect('u')[0].text_content().strip())
-        except:
+        except Exception:
             pass
 
         item = ResultItem(id="nnm_" + item_id,
@@ -327,7 +327,7 @@ class Rutor(TrackerHelper):
         try:
             logging.debug("Response code: %d %s", response.code, response.reason)
             response.rethrow()
-        except:
+        except Exception:
             logging.exception("Error making request")
             raise gen.Return([])
 
@@ -344,7 +344,7 @@ class Rutor(TrackerHelper):
         href = cells[1].cssselect('a')[0].attrib['href']
         link = self.base_url + href + '/'
 
-        m = re.search('(\d+)$', href)
+        m = re.search(r'(\d+)$', href)
         item_id = m.group(1)
 
         title = cells[1].cssselect('a')[1].text_content().strip()
@@ -362,7 +362,7 @@ class Rutor(TrackerHelper):
 
     @gen.coroutine
     def download(self, url):
-        m = re.search("rutor.org/torrent/(\\d+)", url)
+        m = re.search(r'rutor.org/torrent/(\d+)', url)
         torrent = m.group(1)
 
         url = "http://new-rutor.org/parse/d.rutor.org/download/%s/" % torrent
@@ -465,7 +465,6 @@ class TransmissionManager(TorrentManager):
 
     @gen.coroutine
     def add_torrent(self, torrent_data, old_torrent_info=None):
-        info_hash = None
         try:
             # Check downloaded torrent file for correctly and info_hash changed
             tr_info = bencode.bdecode(torrent_data)
@@ -516,18 +515,17 @@ class UpdateChecker(BotRequestHandler):
         self.trackers = trackers
 
         self.search_renderer = Renderer(
-            u"""<b>{{item.title|e}}</b>
-Раздел: {{item.category|e}}
-Размер: {% if item.size | int(-1) == -1 %}{{item.size | e}}{% else %}{{ item.size | default(0) | int | filesizeformat }}{% endif %}
-Добавлено: {{ item.added | default(0) | int | todatetime | datetimeformat('%d-%m-%Y') }}
-Скачать: /download_{{item.id}}
-
-"""
+            u"<b>{{item.title|e}}</b>\n"
+            u"Раздел: {{item.category|e}}\n"
+            u"Размер: {% if item.size | int(-1) == -1 %}{{item.size | e}}{% else %}"
+            u"{{ item.size | default(0) | int | filesizeformat }}{% endif %}\n"
+            u"Добавлено: {{ item.added | default(0) | int | todatetime | datetimeformat('%d-%m-%Y') }}\n"
+            u"Скачать: /download_{{item.id}}\n"
+            u"\n"
         )
         self.torrent_renderer = Renderer(
-            u"""<b>{{ item.name | e }}</b> - {{ "%0.2f" | format(item.done*100) }}% done
- 
-""")
+            u"<b>{{ item.name | e }}</b> - {{ \"%0.2f\" | format(item.done*100) }}% done\n\n"
+        )
         self.cache = []
         self.update_task = PeriodicCallback(self.do_update, 15 * 60 * 1000)
         pass
@@ -550,7 +548,7 @@ class UpdateChecker(BotRequestHandler):
 
         search_id = int(data[1])
         start = int(data[2])
-        if search_id >= 0 and search_id < len(self.cache):
+        if 0 <= search_id < len(self.cache):
             chat_id = self.cache[search_id]['chat_id']
             message_id = self.cache[search_id]['message_id']
             results = self.cache[search_id]['results']
@@ -692,7 +690,7 @@ class UpdateChecker(BotRequestHandler):
                             to=user_id, message_id=message_id, text='Torrent "%s" downloaded' % torrent_name
                         )
                         break
-            except:
+            except Exception:
                 logging.exception("Error while download torrent data")
                 self.bot.edit_message(
                     to=user_id, message_id=message_id, text="Sorry, error occurred!\n%s" % traceback.format_exc()
@@ -741,7 +739,7 @@ class UpdateChecker(BotRequestHandler):
                                 to=chat_id,
                                 text='Torrent "%s" updated' % torrent['name']
                             )
-                    except:
+                    except Exception:
                         logging.exception('Error while check updates')
                     continue
             pass

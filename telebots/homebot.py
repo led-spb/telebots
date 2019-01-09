@@ -215,7 +215,7 @@ def main():
 
     # configure logging
     logging.basicConfig(
-        format="[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",
+        format="[%(asctime)s]\t[%(levelname)s]\t[%(name)s]\t%(message)s",
         level=logging.DEBUG if args.verbose else logging.INFO,
         filename=args.logfile
     )
