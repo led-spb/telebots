@@ -510,6 +510,7 @@ class TransmissionManager(TorrentManager):
 
 class UpdateChecker(BotRequestHandler):
     def __init__(self, manager, trackers, ioloop=None):
+        BotRequestHandler.__init__(self)
         self.ioloop = ioloop or IOLoop.current()
         self.manager = manager
         self.trackers = trackers
