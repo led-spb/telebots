@@ -466,7 +466,7 @@ class TransmissionManager(TorrentManager):
 
         f = open(script_filename, "wb")
         f.write("#!/bin/sh\n")
-        f.write("curl -X POST -d 'Transmission done downloading \"${TR_TORRENT_NAME}\"' %s" % url)
+        f.write('curl -X POST -d "TransmissionBT finish download torrent \"${TR_TORRENT_NAME}\"" %s' % url)
         f.close()
 
         os.chmod(script_filename, 0o755)
