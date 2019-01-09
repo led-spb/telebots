@@ -9,7 +9,7 @@ import time
 import urlparse
 import asyncmqtt.client as mqtt
 from cStringIO import StringIO
-from asynctelebot.telebot import Bot, BotRequestHandler, authorized
+from asynctelebot.telebot import Bot, BotRequestHandler, TextMessageHandler
 from tornado import gen
 from tornado.ioloop import IOLoop
 from tornado.httpclient import AsyncHTTPClient
@@ -17,6 +17,7 @@ from tornado.httpclient import AsyncHTTPClient
 
 class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
     def __init__(self, ioloop, mqtt_url, sensors=None, cameras=None):
+        BotRequestHandler.__init__(self)
         self.logger = logging.getLogger(self.__class__.__name__)
         self.ioloop = ioloop
         self.sensors = sensors or []
@@ -70,13 +71,13 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
             handler(path, payload)
         pass
 
-    @authorized
-    def cmd_photo(self, message=None):
+    @TextMessageHandler('/photo', authorized=True)
+    def cmd_photo(self, message):
         self.http_client.fetch("http://127.0.0.1:8082/0/action/snapshot")
         return None
 
-    @authorized
-    def cmd_sub(self, message=None):
+    @TextMessageHandler('/sub( .*)', authorized=True)
+    def cmd_sub(self, message):
         args = message['text'].split()
 
         if len(args) < 1 or args[0].lower() != 'off':
@@ -102,7 +103,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
                              data=json.dumps({'template': template})).text
     """
 
-    @authorized
+    @TextMessageHandler("/video( .*)", authorized=True)
     def cmd_video(self, message=None):
         params = message['text'].split()
         video = params[1] if len(params) > 1 else None
@@ -230,7 +231,7 @@ def main():
     )
     bot = Bot(args.token, args.admins, proxy=args.proxy, ioloop=ioloop)
     # Default handler
-    bot.addHandler(handler)
+    bot.add_handler(handler)
     bot.loop_start()
     handler.start()
     try:
