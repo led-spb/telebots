@@ -545,16 +545,18 @@ class UpdateChecker(BotRequestHandler):
             self.show_results(search_id, chat_id, message_id, results, start)
         return True
 
-    @gen.coroutine
     @PatternMessageHandler('/status', authorized=True)
     def cmd_status(self, message_id, chat):
-        torrents = yield self.manager.get_torrents()
-        text = [self.torrent_renderer.render(x) for x in torrents]
-        self.bot.send_message(
-            to=chat['id'], reply_to_id=message_id, text="".join(text),
-            extra={'parse_mode': 'HTML'}
-        )
-        raise gen.Return(True)
+        @gen.coroutine
+        def execute():
+            torrents = yield self.manager.get_torrents()
+            text = [self.torrent_renderer.render(x) for x in torrents]
+            self.bot.send_message(
+                to=chat['id'], reply_to_id=message_id, text="".join(text),
+                extra={'parse_mode': 'HTML'}
+            )
+        execute()
+        return True
 
     @PatternMessageHandler('/update( .*)?', authorized=True)
     def cmd_update(self, chat, text):
@@ -622,64 +624,68 @@ class UpdateChecker(BotRequestHandler):
         )
         pass
 
-    @gen.coroutine
     @PatternMessageHandler('[^/].*')
     def do_search(self, text, chat, message_id):
         query = text
         chat_id = chat['id']
-        # Send reply "search in progress"
-        msg = yield self.bot.send_message(
-            to=chat_id,
-            reply_to_id=message_id,
-            text="Search in progress...",
-        )
-        placeholder_message_id = json.loads(msg.body)['result']['message_id']
-        self.async_search(None, chat_id, placeholder_message_id, query)
-        raise gen.Return(True)
 
-    @gen.coroutine
+        @gen.coroutine
+        def execute():
+            # Send reply "search in progress"
+            msg = yield self.bot.send_message(
+                to=chat_id,
+                reply_to_id=message_id,
+                text="Search in progress...",
+            )
+            placeholder_message_id = json.loads(msg.body)['result']['message_id']
+            self.async_search(None, chat_id, placeholder_message_id, query)
+        execute()
+        return True
+
     @PatternMessageHandler('/download .*')
     def do_download(self, chat, text):
         query = text
         user_id = chat['id']
 
-        item_id = query.split('_', 1)[1]
-        logging.info("Search download url for id=%s", item_id)
-        item = None
-        for search in self.cache:
-            for result in search['results']:
-                if result.id == item_id:
-                    item = result
-                    break
-            if item is not None:
-                break
-
-        if item is not None:
-            url = item.link
-
-            msg = yield self.bot.send_message(to=user_id, text='Downloading...')
-            message_id = json.loads(msg.body)['result']['message_id']
-            try:
-                for tracker in self.trackers:
-                    if tracker.check_url(url):
-                        torrent_data = yield tracker.download(url)
-                        tr_info = bencode.bdecode(torrent_data)
-                        torrent_name = tr_info['info']['name']
-
-                        yield self.manager.add_torrent(torrent_data)
-                        self.bot.edit_message(
-                            to=user_id, message_id=message_id, text='Torrent "%s" downloaded' % torrent_name
-                        )
+        @gen.coroutine
+        def execute():
+            item_id = query.split('_', 1)[1]
+            logging.info("Search download url for id=%s", item_id)
+            item = None
+            for search in self.cache:
+                for result in search['results']:
+                    if result.id == item_id:
+                        item = result
                         break
-            except Exception:
-                logging.exception("Error while download torrent data")
-                self.bot.edit_message(
-                    to=user_id, message_id=message_id, text="Sorry, error occurred!\n%s" % traceback.format_exc()
-                )
-        else:
-            logging.warn("Couldn't find download url for id %s", item_id)
+                if item is not None:
+                    break
 
-        raise gen.Return(True)
+            if item is not None:
+                url = item.link
+
+                msg = yield self.bot.send_message(to=user_id, text='Downloading...')
+                message_id = json.loads(msg.body)['result']['message_id']
+                try:
+                    for tracker in self.trackers:
+                        if tracker.check_url(url):
+                            torrent_data = yield tracker.download(url)
+                            tr_info = bencode.bdecode(torrent_data)
+                            torrent_name = tr_info['info']['name']
+
+                            yield self.manager.add_torrent(torrent_data)
+                            self.bot.edit_message(
+                                to=user_id, message_id=message_id, text='Torrent "%s" downloaded' % torrent_name
+                            )
+                            break
+                except Exception:
+                    logging.exception("Error while download torrent data")
+                    self.bot.edit_message(
+                        to=user_id, message_id=message_id, text="Sorry, error occurred!\n%s" % traceback.format_exc()
+                    )
+            else:
+                logging.warn("Couldn't find download url for id %s", item_id)
+        execute()
+        return True
 
     @gen.coroutine
     def async_search(self, search_id, chat_id, message_id, query):

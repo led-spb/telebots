@@ -94,42 +94,45 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
             self.logger.exception("Exception in activity job")
         return
 
-    @gen.coroutine
     @PatternMessageHandler("/track( .*)?", authorized=True)
     def cmd_track(self, text, chat):
         cmd = text.split()
-        has_file = False
-        mask = ''
-        if len(cmd) > 1:
-            try:
-                os.stat(cmd[1])
-                has_file = True
-            except:
-                mask = cmd[1]
-                pass
 
-        if not has_file:
-            files = sorted([x for x in os.listdir('.')
-                            if re.match('.*%s.*\.gpx' % mask, x)], reverse=True)[:10]
-            buttons = [[{
-                'callback_data': '/track '+fname,
-                'text': fname
-            }] for fname in files]
-            self.bot.send_message(
-                to=chat['id'],
-                text='which track?' if len(files) > 0 else 'No tracks',
-                markup={'inline_keyboard': buttons}
-            )
-        else:
-            image = yield self.gpx_to_image(cmd[1])
-            # send image
-            self.bot.send_message(
-                to=chat['id'],
-                photo=('image.png', StringIO(image), 'image/png'),
-                extra={'caption': cmd[1]}
-            )
-            pass
-        raise gen.Return(True)
+        @gen.coroutine
+        def execute():
+            has_file = False
+            mask = ''
+            if len(cmd) > 1:
+                try:
+                    os.stat(cmd[1])
+                    has_file = True
+                except:
+                    mask = cmd[1]
+                    pass
+
+            if not has_file:
+                files = sorted([x for x in os.listdir('.')
+                                if re.match('.*%s.*\.gpx' % mask, x)], reverse=True)[:10]
+                buttons = [[{
+                    'callback_data': '/track '+fname,
+                    'text': fname
+                }] for fname in files]
+                self.bot.send_message(
+                    to=chat['id'],
+                    text='which track?' if len(files) > 0 else 'No tracks',
+                    markup={'inline_keyboard': buttons}
+                )
+            else:
+                image = yield self.gpx_to_image(cmd[1])
+                # send image
+                self.bot.send_message(
+                    to=chat['id'],
+                    photo=('image.png', StringIO(image), 'image/png'),
+                    extra={'caption': cmd[1]}
+                )
+            return
+        execute()
+        return True
 
     @gen.coroutine
     def gpx_to_image(self, gpx_file):
