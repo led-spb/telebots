@@ -9,7 +9,7 @@ import time
 import urlparse
 import asyncmqtt.client as mqtt
 from cStringIO import StringIO
-from asynctelebot.telebot import Bot, BotRequestHandler, TextMessageHandler
+from asynctelebot.telebot import Bot, BotRequestHandler, PatternMessageHandler
 from tornado import gen
 from tornado.ioloop import IOLoop
 from tornado.httpclient import AsyncHTTPClient
@@ -71,20 +71,20 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
             handler(path, payload)
         pass
 
-    @TextMessageHandler('/photo', authorized=True)
-    def cmd_photo(self, message):
+    @PatternMessageHandler('/photo', authorized=True)
+    def cmd_photo(self):
         self.http_client.fetch("http://127.0.0.1:8082/0/action/snapshot")
-        return None
+        return True
 
-    @TextMessageHandler('/sub( .*)?', authorized=True)
-    def cmd_sub(self, message):
-        args = message['text'].split()
+    @PatternMessageHandler('/sub( .*)?', authorized=True)
+    def cmd_sub(self, text):
+        args = text.split()
 
         if len(args) < 1 or args[0].lower() != 'off':
             self.subscribe = True
         else:
             self.subscribe = False
-        return None
+        return True
 
     """
     @authorized
@@ -103,37 +103,38 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
                              data=json.dumps({'template': template})).text
     """
 
-    @TextMessageHandler("/video( .*)?", authorized=True)
-    def cmd_video(self, message=None):
-        params = message['text'].split()
+    @PatternMessageHandler("/video( .*)?", authorized=True)
+    def cmd_video(self, chat, text):
+        params = text.split()
         video = params[1] if len(params) > 1 else None
 
         if video is None:
             files = sorted([x for x in os.listdir('/home/hub/motion')
-                            if re.match('\d{8}_\d{6}\.mp4', x)], reverse=True)
+                            if re.match(r'\d{8}_\d{6}\.mp4', x)], reverse=True)
 
             buttons = [{
                 'callback_data': '/video '+fname,
-                'text': re.sub('^\d{8}_(\d{2})(\d{2}).*$', '\\1:\\2', fname)
+                'text': re.sub(r'^\d{8}_(\d{2})(\d{2}).*$', '\\1:\\2', fname)
             } for fname in files]
             keyboard = [
                 x for x in [
                     buttons[i*7:(i+1)*7] for i in range(len(buttons)/7+1)
                 ] if len(x) > 0
             ]
-            return self.bot.send_message(
-                       to=message['chat']['id'],
+            self.bot.send_message(
+                       to=chat.get('id'),
                        text='which video?',
                        markup={'inline_keyboard': keyboard}
             )
+        else:
+            caption = re.sub(r'^\d{8}_(\d{2})(\d{2}).*$', '\\1:\\2', video)
+            self.bot.send_message(
+                       to=chat.get('id'),
+                       video=('video.mp4', open('/home/hub/motion/'+video, 'rb'), 'video/mp4'),
+                       extra={'caption': caption}
+            )
+        return True
 
-        caption = re.sub('^\d{8}_(\d{2})(\d{2}).*$', '\\1:\\2', video)
-        return self.bot.send_message(
-                   to=message['chat']['id'],
-                   video=('video.mp4', open('/home/hub/motion/'+video, 'rb'), 'video/mp4'),
-                   extra={'caption': caption}
-        )
-    
     def event_camera(self, path, payload):
         cam_no = path[0]
         event_type = path[1]

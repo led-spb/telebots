@@ -18,7 +18,7 @@ from urlparse import urlparse
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado import gen
-from asynctelebot.telebot import Bot, BotRequestHandler, TextMessageHandler
+from asynctelebot.telebot import Bot, BotRequestHandler, PatternMessageHandler
 from jinja2 import Environment
 
 
@@ -531,9 +531,9 @@ class UpdateChecker(BotRequestHandler):
         self.update_task = PeriodicCallback(self.do_update, 15 * 60 * 1000)
         pass
 
-    @TextMessageHandler('/show( .*)?', authorized=True)
-    def cmd_show(self, message=None):
-        data = message['text'].split()
+    @PatternMessageHandler('/show( .*)?', authorized=True)
+    def cmd_show(self, chat, text):
+        data = text.split()
 
         search_id = int(data[1])
         start = int(data[2])
@@ -543,23 +543,23 @@ class UpdateChecker(BotRequestHandler):
             results = self.cache[search_id]['results']
 
             self.show_results(search_id, chat_id, message_id, results, start)
-        pass
+        return True
 
-    @TextMessageHandler('/status', authorized=True)
+    @PatternMessageHandler('/status', authorized=True)
     @gen.coroutine
-    def cmd_status(self, message=None):
+    def cmd_status(self, message_id, chat):
         torrents = yield self.manager.get_torrents()
         text = [self.torrent_renderer.render(x) for x in torrents]
         self.bot.send_message(
-            to=message['chat']['id'], reply_to_id=message['message_id'], text="".join(text),
+            to=chat['id'], reply_to_id=message_id, text="".join(text),
             extra={'parse_mode': 'HTML'}
         )
-        pass
+        raise gen.Return(True)
 
-    @TextMessageHandler('/update( .*)?', authorized=True)
-    @gen.coroutine
-    def cmd_update(self, message):
-        cmd = message['text'].split()
+    @PatternMessageHandler('/update( .*)?', authorized=True)
+    def cmd_update(self, chat, text):
+        cmd = text.split()
+        chat_id = chat['id']
         if len(cmd) == 1:
             buttons = [
                 {'text': 'Now', 'callback_data': '/update now'},
@@ -569,13 +569,13 @@ class UpdateChecker(BotRequestHandler):
                 {'text': 'Off', 'callback_data': '/update 0'},
             ]
             markup = {'inline_keyboard': [buttons]}
-            yield self.bot.send_message(
-                to=message['chat']['id'], text='Schedule update', extra={'parse_mode': 'HTML'}, markup=markup
+            self.bot.send_message(
+                to=chat_id, text='Schedule update', extra={'parse_mode': 'HTML'}, markup=markup
             )
         else:
             when = cmd[1]
             if when == 'now':
-                self.do_update(message['chat']['id'])
+                self.do_update(chat_id)
             else:
                 minutes = int(when)
                 if self.update_task.is_running():
@@ -588,11 +588,9 @@ class UpdateChecker(BotRequestHandler):
                 else:
                     text = 'Schedule updated: off'
 
-                self.bot.send_message(
-                    to=message['chat']['id'], text=text
-                )
+                self.bot.send_message(to=chat_id, text=text)
             pass
-        pass
+        return True
 
     def show_results(self, search_id, chat_id, message_id, results, start, page_size=3):
         message = 'Sorry, nothing is found'
@@ -624,34 +622,26 @@ class UpdateChecker(BotRequestHandler):
         )
         pass
 
-    @TextMessageHandler('[^/].*')
-    def do_search(self, message=None):
-        query = message['text']
-
-        def start_search(response):
-            response.rethrow()
-            result = json.loads(response.body)['result']
-
-            chat_id = result['chat']['id']
-            message_id = result['message_id']
-
-            self.async_search(None, chat_id, message_id, query)
-            pass
-
-        # Send reply "search in progress" and start search
-        self.bot.send_message(
-            to=message['chat']['id'],
-            reply_to_id=message['message_id'],
-            text="Search in progress...",
-            callback=start_search
-        )
-        pass
-
-    @TextMessageHandler('/download .*')
+    @PatternMessageHandler('[^/].*')
     @gen.coroutine
-    def do_download(self, message=None):
-        query = message['text']
-        user_id = message['chat']['id']
+    def do_search(self, text, chat, message_id):
+        query = text
+        chat_id = chat['id']
+        # Send reply "search in progress"
+        msg = yield self.bot.send_message(
+            to=chat_id,
+            reply_to_id=message_id,
+            text="Search in progress...",
+        )
+        placeholder_message_id = json.loads(msg.body)['result']['message_id']
+        self.async_search(None, chat_id, placeholder_message_id, query)
+        raise gen.Return(True)
+
+    @PatternMessageHandler('/download .*')
+    @gen.coroutine
+    def do_download(self, chat, text):
+        query = text
+        user_id = chat['id']
 
         item_id = query.split('_', 1)[1]
         logging.info("Search download url for id=%s", item_id)
@@ -689,7 +679,7 @@ class UpdateChecker(BotRequestHandler):
         else:
             logging.warn("Couldn't find download url for id %s", item_id)
 
-        raise gen.Return()
+        raise gen.Return(True)
 
     @gen.coroutine
     def async_search(self, search_id, chat_id, message_id, query):

@@ -13,7 +13,7 @@ from cStringIO import StringIO
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.httpclient import AsyncHTTPClient
-from asynctelebot.telebot import Bot, BotRequestHandler, TextMessageHandler
+from asynctelebot.telebot import Bot, BotRequestHandler, PatternMessageHandler
 from jinja2 import Environment
 import humanize
 from collections import defaultdict
@@ -78,29 +78,26 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
                             self.logger.warn(msg)
 
                             yield self.bot.send_message(to=chat_id, text=msg, extra={'parse_mode': 'HTML'})
-                            yield self.cmd_info(None)
-                            yield self.bot.send_message(
-                                to=chat_id, latitude=status['location'][0], longitude=status['location'][1]
-                            )
+                            yield self.notify_info(chat_id, device)
+                            yield self.notify_location(chat_id, device)
                     else:
                         if prev_signal_lost:
                             msg = '<b>NORM</b> signal from %s is cached now' % device
                             self.logger.warn(msg)
                             yield self.bot.send_message(to=chat_id, text=msg, extra={'parse_mode': 'HTML'})
-                            yield self.cmd_info(None)
-                            yield self.bot.send_message(
-                                to=chat_id, latitude=status['location'][0], longitude=status['location'][1]
-                            )
+                            yield self.notify_info(chat_id, device)
+                            yield self.notify_location(chat_id, device)
+
                     status['lost'] = is_signal_lost
                 pass
         except Exception:
             self.logger.exception("Exception in activity job")
         return
 
-    @TextMessageHandler("/track.*", authorized=True)
+    @PatternMessageHandler("/track.*", authorized=True)
     @gen.coroutine
-    def cmd_track(self, message):
-        cmd = message['text'].split()
+    def cmd_track(self, text, chat):
+        cmd = text.split()
         has_file = False
         mask = ''
         if len(cmd) > 1:
@@ -118,21 +115,21 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
                 'callback_data': '/track '+fname,
                 'text': fname
             }] for fname in files]
-            yield self.bot.send_message(
-                to=message['chat']['id'],
+            self.bot.send_message(
+                to=chat['id'],
                 text='which track?' if len(files) > 0 else 'No tracks',
                 markup={'inline_keyboard': buttons}
             )
         else:
             image = yield self.gpx_to_image(cmd[1])
             # send image
-            yield self.bot.send_message(
-                to=message['chat']['id'],
+            self.bot.send_message(
+                to=chat['id'],
                 photo=('image.png', StringIO(image), 'image/png'),
                 extra={'caption': cmd[1]}
             )
             pass
-        pass
+        raise gen.Return(True)
 
     @gen.coroutine
     def gpx_to_image(self, gpx_file):
@@ -150,57 +147,60 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
             raise gen.Return(response.body)
             pass
 
-    @TextMessageHandler("/debug", authorized=True)
+    @PatternMessageHandler("/debug", authorized=True)
     def cmd_debug(self, message=None):
         chat_id = message['chat']['id'] if message is not None else self.bot.admins[0]
 
         buf = StringIO(json.dumps(self.devices, indent=2, sort_keys=True, default=json_serial))
-        return self.bot.send_message(
+        self.bot.send_message(
             to=chat_id,
             document=('debug.txt', buf, 'text/plain'),
             extra={'caption': 'debug info'}
         )
+        return True
 
-    @TextMessageHandler("/info.*", authorized=True)
-    def cmd_info(self, message=None):
-        params = ()
-        chat_id = self.bot.admins[0]
-        if message is not None:
-            chat_id = message['chat']['id']
-            params = message['text'].split()
+    @PatternMessageHandler("/info( .*)?", authorized=True)
+    def cmd_info(self, chat, text):
+        params = text.split()
         device = params[1] if len(params) > 1 else None
+        self.notify_info(chat['id'], device)
+        return True
 
+    def notify_info(self, chat_id, device=None):
         template = self.jinja.from_string("""
-{% for device, info in devices.iteritems() %}
-<b>{{device}}</b>
-power: {{info.location.batt}}%
-ignition: {{ 'on' if info.status.charge>0 else 'off' }}
-temperature: {{info.location.temp}}
-distance move: {{info.status.distance}}m
-last location: {{info.status.location_date | human_date }}
-signal: {{info.location.src}} {{info.location.sat}}
+        {% for device, info in devices.iteritems() %}
+        <b>{{device}}</b>
+        power: {{info.location.batt}}%
+        ignition: {{ 'on' if info.status.charge>0 else 'off' }}
+        temperature: {{info.location.temp}}
+        distance move: {{info.status.distance}}m
+        last location: {{info.status.location_date | human_date }}
+        signal: {{info.location.src}} {{info.location.sat}}
 
-{% endfor %}
-""")
+        {% endfor %}
+        """)
         devices = {name: data for name, data in self.devices.iteritems() if device is None or name == device}
         return self.bot.send_message(
-                   to=chat_id,
-                   text=template.render(devices=devices),
-                   extra={'parse_mode': 'HTML'}
+            to=chat_id,
+            text=template.render(devices=devices),
+            extra={'parse_mode': 'HTML'}
         )
 
-    @TextMessageHandler("/location", authorized=True)
-    def cmd_location(self, message=None):
-        chat_id = self.bot.admins[0]
-        if message is not None:
-            chat_id = message['chat']['id']
+    @PatternMessageHandler("/location", authorized=True)
+    def cmd_location(self, chat):
+        self.notify_location(chat['id'])
+        return True
 
-        for device, data in self.devices.iteritems():
-            self.bot.send_message(
-                 to=chat_id,
-                 latitude=data['location']['lat'],
-                 longitude=data['location']['lon']
-            )
+    def notify_location(self, chat_id, device=None):
+        futures = []
+        for dev, data in self.devices.iteritems():
+            if dev == device or device is None:
+                futures.append(
+                    self.bot.send_message(
+                        to=chat_id, latitude=data['location']['lat'], longitude=data['location']['lon']
+                    )
+                )
+        return futures
 
     def on_mqtt_connect(self, client, userdata, flags, rc):
         self.logger.info("MQTT broker connection result: %s", mqtt.connack_string(rc))
@@ -259,7 +259,7 @@ signal: {{info.location.src}} {{info.location.sat}}
             )
 
         if distance > 500:
-            self.cmd_location(message=None)
+            self.notify_location(chat_id, device)
 
         self.devices[device]['status']['low_batt'] = low_battery
         self.devices[device]['status']['location_date'] = event_time
