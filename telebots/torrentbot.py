@@ -17,6 +17,7 @@ from datetime import datetime
 from urlparse import urlparse
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 from tornado.ioloop import IOLoop, PeriodicCallback
+import tornado.web
 from tornado import gen
 from asynctelebot.telebot import Bot, BotRequestHandler, PatternMessageHandler
 from jinja2 import Environment
@@ -204,9 +205,6 @@ class NonameClub(TrackerHelper):
     def download(self, url):
         if not self.isAuth or self.sid is None:
             self.login()
-
-        # m = re.search("viewtopic.php\\?[tp]=(\\d+)", url)
-        # torrent = m.group(1)
 
         logging.info("Start download %s", url)
         request = HTTPRequest(
@@ -722,7 +720,7 @@ class UpdateChecker(BotRequestHandler):
                         added = yield self.manager.add_torrent(torrent_data, torrent)
                         if added:
                             updated = True
-                            yield self.bot.send_message(
+                            self.bot.send_message(
                                 to=chat_id,
                                 text='Torrent "%s" updated' % torrent['name']
                             )
@@ -732,10 +730,34 @@ class UpdateChecker(BotRequestHandler):
             pass
 
         if not updated and reply_chat_id is not None:
-            yield self.bot.send_message(
+            self.bot.send_message(
                 to=chat_id,
                 text='No updates'
             )
+        pass
+
+    def do_notify(self, message):
+        logging.info("Notify message: \"%s\"", message)
+        chat_id = self.bot.admins[0]
+        self.bot.send_message(
+            to=chat_id,
+            text=message
+        )
+
+
+class HTTPRequestHandler(tornado.web.RequestHandler):
+
+    def initialize(self, **kwargs):
+        for attr, value in kwargs.iteritems():
+            setattr(self, attr, value)
+
+    @tornado.web.asynchronous
+    def post(self, *args, **kwargs):
+        self.updater.do_notify(self.request.body)
+
+        self.set_status(200)
+        self.write('')
+        self.finish()
         pass
 
 
@@ -759,6 +781,7 @@ def main():
     basic.add_argument("--tmp", default=".", dest="path")
     basic.add_argument("-v", action="store_true", default=False, help="Verbose logging", dest="verbose")
     basic.add_argument("-m", "--manager", dest="manager", default="transmission://127.0.0.1:9091")
+    basic.add_argument("--http", dest="http_port", type=int, default=8094)
 
     download = parser.add_argument_group('download', 'Download helper parameters')
     download.add_argument("--helper", action="append", default=[])
@@ -778,8 +801,8 @@ def main():
     trackers = [TrackerHelper.subclass_for(url)(url, params.proxy) for url in params.helper if
                 TrackerHelper.subclass_for(url) is not None]
     logging.info("tracker support loaded: %s", ",".join([str(tr.name) for tr in trackers]))
-    for tracker in trackers:
-        tracker.login()
+    #for tracker in trackers:
+    #    tracker.login()
 
     manager_class = TorrentManager.subclass_for(params.manager)
     if manager_class is None:
@@ -788,6 +811,12 @@ def main():
     manager = manager_class(params.manager)
 
     updater = UpdateChecker(manager, trackers)
+
+    webapp = tornado.web.Application(
+        [(r'/torrent/done', HTTPRequestHandler, {'updater': updater})]
+    )
+    webapp.listen(port=params.http_port)
+
     ioloop = IOLoop.instance()
 
     bot = Bot(params.token, params.admins, ioloop=ioloop)
