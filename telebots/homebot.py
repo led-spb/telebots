@@ -10,7 +10,6 @@ import urlparse
 import asyncmqtt.client as mqtt
 from cStringIO import StringIO
 from asynctelebot.telebot import Bot, BotRequestHandler, PatternMessageHandler
-from tornado import gen
 from tornado.ioloop import IOLoop
 from tornado.httpclient import AsyncHTTPClient
 

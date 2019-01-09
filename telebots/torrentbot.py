@@ -545,8 +545,8 @@ class UpdateChecker(BotRequestHandler):
             self.show_results(search_id, chat_id, message_id, results, start)
         return True
 
-    @PatternMessageHandler('/status', authorized=True)
     @gen.coroutine
+    @PatternMessageHandler('/status', authorized=True)
     def cmd_status(self, message_id, chat):
         torrents = yield self.manager.get_torrents()
         text = [self.torrent_renderer.render(x) for x in torrents]
@@ -622,8 +622,8 @@ class UpdateChecker(BotRequestHandler):
         )
         pass
 
-    @PatternMessageHandler('[^/].*')
     @gen.coroutine
+    @PatternMessageHandler('[^/].*')
     def do_search(self, text, chat, message_id):
         query = text
         chat_id = chat['id']
@@ -637,8 +637,8 @@ class UpdateChecker(BotRequestHandler):
         self.async_search(None, chat_id, placeholder_message_id, query)
         raise gen.Return(True)
 
-    @PatternMessageHandler('/download .*')
     @gen.coroutine
+    @PatternMessageHandler('/download .*')
     def do_download(self, chat, text):
         query = text
         user_id = chat['id']

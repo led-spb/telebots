@@ -94,8 +94,8 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
             self.logger.exception("Exception in activity job")
         return
 
-    @PatternMessageHandler("/track.*", authorized=True)
     @gen.coroutine
+    @PatternMessageHandler("/track( .*)?", authorized=True)
     def cmd_track(self, text, chat):
         cmd = text.split()
         has_file = False
