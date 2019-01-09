@@ -461,6 +461,23 @@ class TransmissionManager(TorrentManager):
             result.append(info)
         raise gen.Return(result)
 
+    def set_torrent_done_handler(self, url="http://localhost:8094/download/done"):
+        script_filename = "torrentbot-notify.sh"
+
+        f = open(script_filename, "wb")
+        f.write("#!/bin/sh\n")
+        f.write("curl -X POST -d 'Transmission done downloading \"${TR_TORRENT_NAME}\"' %s" % url)
+        f.close()
+
+        os.chmod(script_filename, 0o755)
+
+        self.request(
+            'session-set',
+            **{"script-torrent-done-enabled": True,
+               "script-torrent-done-filename": os.path.join(os.getcwd(), script_filename)}
+        )
+        pass
+
     @gen.coroutine
     def add_torrent(self, torrent_data, old_torrent_info=None):
         try:
@@ -809,11 +826,12 @@ def main():
         logging.error("Unknown torrent manager scheme")
         exit()
     manager = manager_class(params.manager)
+    manager.set_torrent_done_handler()
 
     updater = UpdateChecker(manager, trackers)
 
     webapp = tornado.web.Application(
-        [(r'/torrent/done', HTTPRequestHandler, {'updater': updater})]
+        [(r'/download/done', HTTPRequestHandler, {'updater': updater})]
     )
     webapp.listen(port=params.http_port)
 
