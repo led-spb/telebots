@@ -32,7 +32,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
         BotRequestHandler.__init__(self)
         self.logger = logging.getLogger(self.__class__.__name__)
         self.url = url
-        self.devices = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: None)))
+        self.devices = defaultdict(lambda: defaultdict(lambda: defaultdict(object)))
         self.ioloop = ioloop
         self.name = name
         self.low_battery = (10, 15)
@@ -62,6 +62,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
     def human_date(value):
         return humanize.naturaltime(value)
 
+    # noinspection PyBroadException
     @gen.coroutine
     def activity_job(self):
         self.logger.debug("Activity check job started")
@@ -70,24 +71,21 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
             for device in self.devices:
                 status = self.devices[device]['status']
                 if 'location_date' in status:
-                    is_signal_lost = (datetime.datetime.now()-status['location_date']).total_seconds() >= 25*60*60
-                    prev_signal_lost = status['lost'] or False
-                    if is_signal_lost:
-                        if not prev_signal_lost:
+                    signal_gap = datetime.datetime.now()-status.get('location_date')
+                    is_signal_lost = signal_gap.total_seconds() >= 25*60*60
+                    prev_signal_lost = status.get('lost') or False
+
+                    if is_signal_lost != prev_signal_lost:
+                        if is_signal_lost:
                             msg = '<b>WARN</b> last message from %s is %s' % \
                                   (device, self.human_date(status['location_date']))
-                            self.logger.warn(msg)
-
-                            yield self.bot.send_message(to=chat_id, message=msg, parse_mode='HTML')
-                            yield self.notify_info(chat_id, device)
-                            yield self.notify_location(chat_id, device)
-                    else:
-                        if prev_signal_lost:
+                        else:
                             msg = '<b>NORM</b> signal from %s is cached now' % device
-                            self.logger.warn(msg)
-                            yield self.bot.send_message(to=chat_id, message=msg, parse_mode='HTML')
-                            yield self.notify_info(chat_id, device)
-                            yield self.notify_location(chat_id, device)
+
+                        self.logger.warn(msg)
+                        yield self.bot.send_message(to=chat_id, message=msg, parse_mode='HTML')
+                        yield self.notify_info(chat_id, device)
+                        yield self.notify_location(chat_id, device)
 
                     status['lost'] = is_signal_lost
                 pass
@@ -107,13 +105,13 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
                 try:
                     os.stat(cmd[1])
                     has_file = True
-                except:
+                except OSError:
                     mask = cmd[1]
                     pass
 
             if not has_file:
                 files = sorted([x for x in os.listdir('.')
-                                if re.match('.*%s.*\.gpx' % mask, x)], reverse=True)[:10]
+                                if re.match(r'.*%s.*\.gpx' % mask, x)], reverse=True)[:10]
                 buttons = [[{
                     'callback_data': '/track '+fname,
                     'text': fname
@@ -192,14 +190,16 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
                     self.bot.send_message(
                         to=chat_id,
                         message=template.render(device=dev, info=info),
-                        parse_mode = 'HTML'
+                        parse_mode='HTML'
                     )
                 )
         return futures
 
-    @PatternMessageHandler("/location", authorized=True)
-    def cmd_location(self, chat):
-        self.notify_location(chat['id'])
+    @PatternMessageHandler("/location( .*)", authorized=True)
+    def cmd_location(self, chat, text):
+        params = text.split()
+        device = params[1] if len(params) > 1 else None
+        self.notify_location(chat['id'], device)
         return True
 
     def notify_location(self, chat_id, device=None):
@@ -235,12 +235,14 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
         f = open(filename, "wb")
         f.write(gpx.to_xml())
         f.close()
-        pass    
+        pass
 
+    # noinspection PyUnusedLocal
     def on_msg(self, device, event_time, payload):
         self.logger.info("Message from %s: %s", device, payload['text'])
-        pass    
+        pass
 
+    # noinspection PyUnresolvedReferences
     def on_location(self, device, event_time, payload):
         self.logger.info("Location for %s received", device)
         chat_id = self.bot.admins[0]
@@ -266,7 +268,6 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
             self.logger.warn(msg)
             pass
 
-        last_location = None
         distance = 0
         if 'location' in self.devices[device]['status']:
             last_location = self.devices[device]['status']['location']
@@ -284,9 +285,10 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
         self.devices[device]['status']['charge'] = payload['charge']
         pass
 
+    # noinspection PyBroadException
     def on_mqtt_message(self, client, userdata, message):
         try:
-            sysdate = datetime.datetime.now()
+            # sysdate = datetime.datetime.now()
             self.logger.debug("Got mqtt message on topic %s", message.topic)
 
             d = message.topic.split("/")
@@ -295,12 +297,12 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
             payload = {}
             try:
                 payload = json.loads(message.payload)
-            except:
+            except ValueError:
                 try:
                     # gzip.decompress(message.payload).decode("utf-8")
                     s = zlib.decompress(message.payload, 16+zlib.MAX_WBITS)
                     payload = json.loads(s)
-                except:
+                except (zlib.error, ValueError):
                     self.logger.warn("unknown message compression type %s" % payload)
                     pass
              
@@ -308,7 +310,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
                 event_time = None
                 if 'tst' in payload:
                     event_time = datetime.datetime.utcfromtimestamp(payload['tst']) + self.tz_offset
-                is_old = (sysdate-event_time) > self.msg_expire_delta
+                # is_old = (sysdate-event_time) > self.msg_expire_delta
 
                 self.logger.info("%s message from %s/%s at %s" % (payload['_type'], device, tracker, event_time))
                 self.update_status(device, payload)
@@ -320,7 +322,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
                 logging.debug(json.dumps(self.devices, indent=2, sort_keys=True, default=json_serial))
                 return
             self.logger.warn("unknown message type %s" % payload)
-        except:
+        except Exception:
             self.logger.exception("error while processing MQTT message")
         return
 
@@ -349,11 +351,11 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
             num = num << 1
             if num < 0:
                 num = ~num
-            encoded = ''
+            result = ''
             while num >= 0x20:
-                encoded = encoded + chr((0x20 | (num & 0x1f)) + 63)
+                result = result + chr((0x20 | (num & 0x1f)) + 63)
                 num = num >> 5
-            return encoded + chr(num + 63)
+            return result + chr(num + 63)
 
         namespace = {
             'lat_start': None,
@@ -400,16 +402,16 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
 
 def main():
     class LoadFromFile(argparse.Action):
-        def __call__(self, parser, namespace, values, option_string=None):
+        def __call__(self, parser_obj, namespace, values, option_string=None):
             with values as f:
-                parser.parse_args(f.read().split(), namespace)
+                parser_obj.parse_args(f.read().split(), namespace)
 
     parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
     parser.add_argument("-c", "--config", type=open, action=LoadFromFile, help="Load config from file")
     parser.add_argument("-n", "--name", default="+")
     parser.add_argument("--token", help="Telegram API bot token")
     parser.add_argument("--key", help="MapQuest API key")
-    parser.add_argument("--admin", nargs="+", help="Bot admin", type=int, dest="admins")
+    parser.add_argument("--admin", nargs="+", help="Bot admin", dest="admins")
     parser.add_argument("-u", "--url", default="mqtt://localhost:1883", type=urlparse.urlparse)
     parser.add_argument("-v", action="store_true", default=False, help="Verbose logging", dest="verbose")
     parser.add_argument("--logfile", help="Logging into file")
