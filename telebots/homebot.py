@@ -86,23 +86,6 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
             self.subscribe = False
         return True
 
-    """
-    @authorized
-    def cmd_stat(self, *args):
-        template = '{% for item in states.sensor %}' \
-                   '{% if item.state!=\'unknown\' %}' \
-                   '{{ item.name }} is {{item.state_with_unit}}\n' \
-                   '{% endif %}{% endfor %}'
-        return requests.post('http://127.0.0.1:8123/api/template',
-                             data=json.dumps({'template': template})).text
-
-    @authorized
-    def cmd_door(self, *args):
-        template = 'Door is {{ \'closed\' if states.binary_sensor.door.state == \'off\' else \'open\' }} for {{ relative_time(states.binary_sensor.door.last_changed) }} ({{ as_timestamp(states.binary_sensor.door.last_changed) | timestamp_custom() }})'
-        return requests.post('http://127.0.0.1:8123/api/template',
-                             data=json.dumps({'template': template})).text
-    """
-
     @PatternMessageHandler("/video( .*)?", authorized=True)
     def cmd_video(self, chat, text):
         params = text.split()

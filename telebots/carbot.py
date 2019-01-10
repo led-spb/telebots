@@ -129,7 +129,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
                 self.bot.send_message(
                     to=chat['id'],
                     message=Photo(
-                        photo=('image.png', StringIO(image), 'image/png'),
+                        photo=File('image.png', StringIO(image), 'image/png'),
                         caption=cmd[1]
                     )
                 )
@@ -175,24 +175,27 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
         return True
 
     def notify_info(self, chat_id, device=None):
-        template = self.jinja.from_string("""
-        {% for device, info in devices.iteritems() %}
-        <b>{{device}}</b>
-        power: {{info.location.batt}}%
-        ignition: {{ 'on' if info.status.charge>0 else 'off' }}
-        temperature: {{info.location.temp}}
-        distance move: {{info.status.distance}}m
-        last location: {{info.status.location_date | human_date }}
-        signal: {{info.location.src}} {{info.location.sat}}
-
-        {% endfor %}
-        """)
-        devices = {name: data for name, data in self.devices.iteritems() if device is None or name == device}
-        return self.bot.send_message(
-            to=chat_id,
-            messsage=template.render(devices=devices),
-            parse_mode='HTML'
+        futures = []
+        template = self.jinja.from_string(
+            "<b>{{device}}</b>\n"
+            "power: {{info.location.batt}}%\n"
+            "ignition: {{ 'on' if info.status.charge>0 else 'off' }}\n"
+            "temperature: {{info.location.temp}}\n"
+            "distance move: {{info.status.distance}}m\n"
+            "last location: {{info.status.location_date | human_date }}\n"
+            "signal: {{info.location.src}} {{info.location.sat}}\n"
         )
+
+        for dev, info in self.devices.iteritems():
+            if dev == device or device is None:
+                futures.append(
+                    self.bot.send_message(
+                        to=chat_id,
+                        message=template.render(device=dev, info=info),
+                        parse_mode = 'HTML'
+                    )
+                )
+        return futures
 
     @PatternMessageHandler("/location", authorized=True)
     def cmd_location(self, chat):

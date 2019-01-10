@@ -20,7 +20,7 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 import tornado.web
 from tornado import gen
 from asynctelebot.telebot import Bot, BotRequestHandler, PatternMessageHandler
-from asynctelebot.enity import *
+from asynctelebot.entity import *
 from jinja2 import Environment
 
 
@@ -611,8 +611,8 @@ class UpdateChecker(BotRequestHandler):
             if len(buttons) > 0:
                 markup = {'inline_keyboard': [buttons]}
 
-        self.bot.edit_message(
-            to=chat_id, message_id=message_id, text=message, extra={'parse_mode': 'HTML'}, markup=markup
+        self.bot.edit_message_text(
+            to=chat_id, message_id=message_id, text=message, parse_mode='HTML', reply_markup=markup
         )
         pass
 
@@ -634,7 +634,7 @@ class UpdateChecker(BotRequestHandler):
         execute()
         return True
 
-    @PatternMessageHandler('/download .*')
+    @PatternMessageHandler('/download_.*')
     def do_download(self, chat, text):
         query = text
         user_id = chat['id']
@@ -665,13 +665,13 @@ class UpdateChecker(BotRequestHandler):
                             torrent_name = tr_info['info']['name']
 
                             yield self.manager.add_torrent(torrent_data)
-                            self.bot.edit_message(
+                            self.bot.edit_message_text(
                                 to=user_id, message_id=message_id, text='Torrent "%s" downloaded' % torrent_name
                             )
                             break
                 except Exception:
                     logging.exception("Error while download torrent data")
-                    self.bot.edit_message(
+                    self.bot.edit_message_text(
                         to=user_id, message_id=message_id, text="Sorry, error occurred!\n%s" % traceback.format_exc()
                     )
             else:
@@ -726,7 +726,7 @@ class UpdateChecker(BotRequestHandler):
         if not updated and reply_chat_id is not None:
             self.bot.send_message(
                 to=chat_id,
-                text='No updates'
+                message='No updates'
             )
         pass
 
@@ -737,6 +737,7 @@ class UpdateChecker(BotRequestHandler):
             to=chat_id,
             message=message
         )
+        pass
 
 
 class HTTPRequestHandler(tornado.web.RequestHandler):
