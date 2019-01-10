@@ -776,7 +776,7 @@ def main():
     basic.add_argument("--tmp", default=".", dest="path")
     basic.add_argument("-v", action="store_true", default=False, help="Verbose logging", dest="verbose")
     basic.add_argument("-m", "--manager", dest="manager", default="transmission://127.0.0.1:9091")
-    basic.add_argument("--http", dest="http_port", type=int, default=None)
+    basic.add_argument("--http-port", dest="http_port", type=int, default=None)
 
     download = parser.add_argument_group('download', 'Download helper parameters')
     download.add_argument("--helper", action="append", default=[])
