@@ -14,6 +14,7 @@ from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.httpclient import AsyncHTTPClient
 from asynctelebot.telebot import Bot, BotRequestHandler, PatternMessageHandler
+from asynctelebot.entity import *
 from jinja2 import Environment
 import humanize
 from collections import defaultdict
@@ -77,14 +78,14 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
                                   (device, self.human_date(status['location_date']))
                             self.logger.warn(msg)
 
-                            yield self.bot.send_message(to=chat_id, text=msg, extra={'parse_mode': 'HTML'})
+                            yield self.bot.send_message(to=chat_id, message=msg, parse_mode='HTML')
                             yield self.notify_info(chat_id, device)
                             yield self.notify_location(chat_id, device)
                     else:
                         if prev_signal_lost:
                             msg = '<b>NORM</b> signal from %s is cached now' % device
                             self.logger.warn(msg)
-                            yield self.bot.send_message(to=chat_id, text=msg, extra={'parse_mode': 'HTML'})
+                            yield self.bot.send_message(to=chat_id, message=msg, parse_mode='HTML')
                             yield self.notify_info(chat_id, device)
                             yield self.notify_location(chat_id, device)
 
@@ -119,16 +120,18 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
                 }] for fname in files]
                 self.bot.send_message(
                     to=chat['id'],
-                    text='which track?' if len(files) > 0 else 'No tracks',
-                    markup={'inline_keyboard': buttons}
+                    message='which track?' if len(files) > 0 else 'No tracks',
+                    reply_markup={'inline_keyboard': buttons}
                 )
             else:
                 image = yield self.gpx_to_image(cmd[1])
                 # send image
                 self.bot.send_message(
                     to=chat['id'],
-                    photo=('image.png', StringIO(image), 'image/png'),
-                    extra={'caption': cmd[1]}
+                    message=Photo(
+                        photo=('image.png', StringIO(image), 'image/png'),
+                        caption=cmd[1]
+                    )
                 )
             return
         execute()
@@ -157,8 +160,10 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
         buf = StringIO(json.dumps(self.devices, indent=2, sort_keys=True, default=json_serial))
         self.bot.send_message(
             to=chat_id,
-            document=('debug.txt', buf, 'text/plain'),
-            extra={'caption': 'debug info'}
+            message=Document(
+                document=File('debug.txt', buf, 'text/plain'),
+                caption='debug info'
+            )
         )
         return True
 
@@ -185,8 +190,8 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
         devices = {name: data for name, data in self.devices.iteritems() if device is None or name == device}
         return self.bot.send_message(
             to=chat_id,
-            text=template.render(devices=devices),
-            extra={'parse_mode': 'HTML'}
+            messsage=template.render(devices=devices),
+            parse_mode='HTML'
         )
 
     @PatternMessageHandler("/location", authorized=True)
@@ -200,7 +205,12 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
             if dev == device or device is None:
                 futures.append(
                     self.bot.send_message(
-                        to=chat_id, latitude=data['location']['lat'], longitude=data['location']['lon']
+                        to=chat_id,
+                        message=Venue(
+                            latitude=data['location']['lat'],
+                            longitude=data['location']['lon'],
+                            title=dev, address="Unknown"
+                        )
                     )
                 )
         return futures
@@ -241,12 +251,12 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
             low_battery = True
             msg = '<b>WARN</b> %s has low battery (%d%%)' % (device, battery)
             self.logger.warn(msg)
-            self.bot.send_message(to=chat_id, text=msg, extra={'parse_mode': 'HTML'})
+            self.bot.send_message(to=chat_id, message=msg, parse_mode='HTML')
         if battery >= self.low_battery[1] and low_battery:
             low_battery = False
             msg = '<b>NORM</b> %s has norm battery (%d%%)' % (device, battery)
             self.logger.info(msg)
-            self.bot.send_message(to=chat_id, text=msg, extra={'parse_mode': 'HTML'})
+            self.bot.send_message(to=chat_id, message=msg, parse_mode='HTML')
 
         if last_charge != payload['charge']:
             msg = 'Ignition changed to %s' % ('ON' if payload['charge'] > 0 else 'OFF')

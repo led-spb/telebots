@@ -20,6 +20,7 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 import tornado.web
 from tornado import gen
 from asynctelebot.telebot import Bot, BotRequestHandler, PatternMessageHandler
+from asynctelebot.enity import *
 from jinja2 import Environment
 
 
@@ -441,11 +442,7 @@ class TransmissionManager(TorrentManager):
         )
 
         for t in response['torrents']:
-            files = []
-            for i in range(len(t['files'])):
-                f = t['files'][i]
-                f.update(t['fileStats'][i])
-                files.append(f)
+            files = [dict(f[0], **f[1]) for f in zip(t['files'], t['fileStats'])]
 
             info = {
                 'id': t['id'],
@@ -460,23 +457,6 @@ class TransmissionManager(TorrentManager):
             }
             result.append(info)
         raise gen.Return(result)
-
-    def set_torrent_done_handler(self, url="http://localhost:8094/download/done"):
-        script_filename = "torrentbot-notify.sh"
-
-        f = open(script_filename, "wb")
-        f.write("#!/bin/sh\n")
-        f.write('curl -X POST -d "TransmissionBT finish download torrent \"${TR_TORRENT_NAME}\"" %s' % url)
-        f.close()
-
-        os.chmod(script_filename, 0o755)
-
-        self.request(
-            'session-set',
-            **{"script-torrent-done-enabled": True,
-               "script-torrent-done-filename": os.path.join(os.getcwd(), script_filename)}
-        )
-        pass
 
     @gen.coroutine
     def add_torrent(self, torrent_data, old_torrent_info=None):
@@ -567,8 +547,7 @@ class UpdateChecker(BotRequestHandler):
             torrents = yield self.manager.get_torrents()
             text = [self.torrent_renderer.render(x) for x in torrents]
             self.bot.send_message(
-                to=chat['id'], reply_to_id=message_id, text="".join(text),
-                extra={'parse_mode': 'HTML'}
+                to=chat['id'], message="".join(text), reply_to_message_id=message_id, parse_mode='HTML'
             )
         execute()
         return True
@@ -586,9 +565,7 @@ class UpdateChecker(BotRequestHandler):
                 {'text': 'Off', 'callback_data': '/update 0'},
             ]
             markup = {'inline_keyboard': [buttons]}
-            self.bot.send_message(
-                to=chat_id, text='Schedule update', extra={'parse_mode': 'HTML'}, markup=markup
-            )
+            self.bot.send_message(to=chat_id, message='Schedule update', reply_markup=markup)
         else:
             when = cmd[1]
             if when == 'now':
@@ -605,7 +582,7 @@ class UpdateChecker(BotRequestHandler):
                 else:
                     text = 'Schedule updated: off'
 
-                self.bot.send_message(to=chat_id, text=text)
+                self.bot.send_message(to=chat_id, message=text)
             pass
         return True
 
@@ -649,8 +626,8 @@ class UpdateChecker(BotRequestHandler):
             # Send reply "search in progress"
             msg = yield self.bot.send_message(
                 to=chat_id,
-                reply_to_id=message_id,
-                text="Search in progress...",
+                message="Search in progress...",
+                reply_to_message_id=message_id
             )
             placeholder_message_id = json.loads(msg.body)['result']['message_id']
             self.async_search(None, chat_id, placeholder_message_id, query)
@@ -678,7 +655,7 @@ class UpdateChecker(BotRequestHandler):
             if item is not None:
                 url = item.link
 
-                msg = yield self.bot.send_message(to=user_id, text='Downloading...')
+                msg = yield self.bot.send_message(to=user_id, message='Downloading...')
                 message_id = json.loads(msg.body)['result']['message_id']
                 try:
                     for tracker in self.trackers:
@@ -739,7 +716,7 @@ class UpdateChecker(BotRequestHandler):
                             updated = True
                             self.bot.send_message(
                                 to=chat_id,
-                                text='Torrent "%s" updated' % torrent['name']
+                                message='Torrent "%s" updated' % torrent['name']
                             )
                     except Exception:
                         logging.exception('Error while check updates')
@@ -758,7 +735,7 @@ class UpdateChecker(BotRequestHandler):
         chat_id = self.bot.admins[0]
         self.bot.send_message(
             to=chat_id,
-            text=message
+            message=message
         )
 
 
@@ -798,7 +775,7 @@ def main():
     basic.add_argument("--tmp", default=".", dest="path")
     basic.add_argument("-v", action="store_true", default=False, help="Verbose logging", dest="verbose")
     basic.add_argument("-m", "--manager", dest="manager", default="transmission://127.0.0.1:9091")
-    basic.add_argument("--http", dest="http_port", type=int, default=8094)
+    basic.add_argument("--http", dest="http_port", type=int, default=None)
 
     download = parser.add_argument_group('download', 'Download helper parameters')
     download.add_argument("--helper", action="append", default=[])
@@ -826,14 +803,13 @@ def main():
         logging.error("Unknown torrent manager scheme")
         exit()
     manager = manager_class(params.manager)
-    manager.set_torrent_done_handler()
 
     updater = UpdateChecker(manager, trackers)
-
-    webapp = tornado.web.Application(
-        [(r'/download/done', HTTPRequestHandler, {'updater': updater})]
-    )
-    webapp.listen(port=params.http_port)
+    if params.http_port is not None:
+        webapp = tornado.web.Application(
+            [(r'/download/done', HTTPRequestHandler, {'updater': updater})]
+        )
+        webapp.listen(port=params.http_port)
 
     ioloop = IOLoop.instance()
 

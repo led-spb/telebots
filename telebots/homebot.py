@@ -10,6 +10,7 @@ import urlparse
 import asyncmqtt.client as mqtt
 from cStringIO import StringIO
 from asynctelebot.telebot import Bot, BotRequestHandler, PatternMessageHandler
+from asynctelebot.entity import *
 from tornado.ioloop import IOLoop
 from tornado.httpclient import AsyncHTTPClient
 
@@ -121,16 +122,18 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
                 ] if len(x) > 0
             ]
             self.bot.send_message(
-                       to=chat.get('id'),
-                       text='which video?',
-                       markup={'inline_keyboard': keyboard}
+                to=chat.get('id'),
+                message='which video?',
+                reply_markup={'inline_keyboard': keyboard}
             )
         else:
             caption = re.sub(r'^\d{8}_(\d{2})(\d{2}).*$', '\\1:\\2', video)
             self.bot.send_message(
-                       to=chat.get('id'),
-                       video=('video.mp4', open('/home/hub/motion/'+video, 'rb'), 'video/mp4'),
-                       extra={'caption': caption}
+                to=chat.get('id'),
+                message=Video(
+                    video=File('video.mp4', open('/home/hub/motion/'+video, 'rb'), 'video/mp4'),
+                    caption=caption
+                )
             )
         return True
 
@@ -148,11 +151,13 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
                 }
 
             for chat_id in self.bot.admins:
-                self.bot.send_message( 
-                   to=chat_id,
-                   photo=('image.jpg', StringIO(payload), 'image/jpeg'),
-                   extra={'caption': 'camera#%s' % cam_no},
-                   markup=markup
+                self.bot.send_message(
+                    to=chat_id,
+                    message=Photo(
+                        photo=File('image.jpg', StringIO(payload), 'image/jpeg'),
+                        caption='camera#%s' % cam_no
+                    ),
+                    reply_markup=markup
                 )
             return None
 
@@ -161,16 +166,17 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
             self.subscribe = False
             for chat_id in self.bot.admins:
                 self.bot.send_message(
-                   to=chat_id, video=('video.mp4', StringIO(payload), 'video/mp4')
+                    to=chat_id,
+                    message=Video(
+                        video=File('video.mp4', StringIO(payload), 'video/mp4')
+                    )
                 )
         pass
 
     def event_notify(self, path, payload):
         self.logger.info("Event notify")
         for chat_id in self.bot.admins:
-            self.bot.send_message(
-                to=chat_id, text=payload
-            )
+            self.bot.send_message(to=chat_id, message=payload)
         pass
 
     def event_sensor(self, path, payload):
@@ -184,7 +190,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
             self.events[sensor] = now
             for chat_id in self.bot.admins:
                 self.bot.send_message(
-                   to=chat_id, text="%s: alert %s" % (sensor, time.strftime("%d.%m %H:%M"))
+                   to=chat_id, message="%s: alert %s" % (sensor, time.strftime("%d.%m %H:%M"))
                 )
         pass
 
