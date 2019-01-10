@@ -32,7 +32,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
         BotRequestHandler.__init__(self)
         self.logger = logging.getLogger(self.__class__.__name__)
         self.url = url
-        self.devices = defaultdict(lambda: defaultdict(lambda: defaultdict(object)))
+        self.devices = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: None)))
         self.ioloop = ioloop
         self.name = name
         self.low_battery = (10, 15)
