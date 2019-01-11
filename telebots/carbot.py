@@ -195,7 +195,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
                 )
         return futures
 
-    @PatternMessageHandler("/location( .*)", authorized=True)
+    @PatternMessageHandler("/location( .*)?", authorized=True)
     def cmd_location(self, chat, text):
         params = text.split()
         device = params[1] if len(params) > 1 else None
