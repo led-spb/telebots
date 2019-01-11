@@ -14,6 +14,7 @@ from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.httpclient import AsyncHTTPClient
 from pytelegram_async.bot import Bot, BotRequestHandler, PatternMessageHandler
+from pytelegram_async.entity import *
 from jinja2 import Environment
 import humanize
 from collections import defaultdict
@@ -410,7 +411,7 @@ def main():
     parser.add_argument("-n", "--name", default="+")
     parser.add_argument("--token", help="Telegram API bot token")
     parser.add_argument("--key", help="MapQuest API key")
-    parser.add_argument("--admin", nargs="+", help="Bot admin", dest="admins")
+    parser.add_argument("--admin", nargs="+", type=int, help="Bot admin", dest="admins")
     parser.add_argument("-u", "--url", default="mqtt://localhost:1883", type=urlparse.urlparse)
     parser.add_argument("-v", action="store_true", default=False, help="Verbose logging", dest="verbose")
     parser.add_argument("--logfile", help="Logging into file")
