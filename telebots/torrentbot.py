@@ -615,7 +615,7 @@ class UpdateChecker(BotRequestHandler):
         )
         pass
 
-    @PatternMessageHandler('[^/].*')
+    @PatternMessageHandler('[^/].*', authorized=True)
     def do_search(self, text, chat, message_id):
         query = text
         chat_id = chat['id']
@@ -633,7 +633,7 @@ class UpdateChecker(BotRequestHandler):
         execute()
         return True
 
-    @PatternMessageHandler('/download_.*')
+    @PatternMessageHandler('/download_.*', authorized=True)
     def do_download(self, chat, text):
         query = text
         user_id = chat['id']
