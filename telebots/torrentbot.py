@@ -701,7 +701,7 @@ class UpdateChecker(BotRequestHandler):
         chat_id = reply_chat_id or self.bot.admins[0]
         updated = False
         torrents = yield self.manager.get_torrents()
-        error = None
+        error = False
 
         for torrent in torrents:
             url = torrent['url']
@@ -722,12 +722,13 @@ class UpdateChecker(BotRequestHandler):
                         logging.exception('Error while check updates')
                         if reply_chat_id is not None:
                             self.bot.send_message(
-                                to=chat_id, message=traceback.format_exception(e)
+                                to=chat_id, message=traceback.format_exc()
                             )
+                        error = True
                     continue
             pass
 
-        if not updated and reply_chat_id is not None:
+        if not error and not updated and reply_chat_id is not None:
             self.bot.send_message(
                 to=chat_id,
                 message='No updates'
