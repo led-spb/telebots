@@ -474,7 +474,7 @@ class TransmissionManager(TorrentManager):
         torrent_data = base64.b64encode(torrent_data)
 
         if old_torrent_info is not None:
-            unwanted = [k for k, v in old_torrent_info['files'].iteritems() if not v['wanted']]
+            unwanted = [k for k, v in enumerate(old_torrent_info['files']) if not v['wanted']]
 
             yield self.request(**{
                 'method': 'torrent-add',
@@ -701,6 +701,7 @@ class UpdateChecker(BotRequestHandler):
         chat_id = reply_chat_id or self.bot.admins[0]
         updated = False
         torrents = yield self.manager.get_torrents()
+        error = None
 
         for torrent in torrents:
             url = torrent['url']
@@ -717,8 +718,12 @@ class UpdateChecker(BotRequestHandler):
                                 to=chat_id,
                                 message='Torrent "%s" updated' % torrent['name']
                             )
-                    except Exception:
+                    except Exception as e:
                         logging.exception('Error while check updates')
+                        if reply_chat_id is not None:
+                            self.bot.send_message(
+                                to=chat_id, message=traceback.format_exception(e)
+                            )
                     continue
             pass
 
