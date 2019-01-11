@@ -3,7 +3,7 @@ import re
 import logging
 import argparse
 import urlparse
-import asyncmqtt.client as mqtt
+import paho_async.client as mqtt
 import json
 import datetime
 import zlib
@@ -13,8 +13,7 @@ from cStringIO import StringIO
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.httpclient import AsyncHTTPClient
-from asynctelebot.telebot import Bot, BotRequestHandler, PatternMessageHandler
-from asynctelebot.entity import *
+from pytelegram_async.bot import Bot, BotRequestHandler, PatternMessageHandler
 from jinja2 import Environment
 import humanize
 from collections import defaultdict

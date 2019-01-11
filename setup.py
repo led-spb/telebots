@@ -1,28 +1,31 @@
 #!/usr/bin/python
 import setuptools
+import telebots as module
 
 setuptools.setup(
-    name="telebots",
-    version="0.1.0",
+    name=module.name,
+    version=module.version,
     author="Alexey Ponimash",
     author_email="alexey.ponimash@gmail.com",
-    description="My useful telegram bots",
-    long_description="",
-    long_description_content_type="text/markdown",
-    url="https://github.com/led-spb/telebots",
-    packages=setuptools.find_packages(),
+    packages=setuptools.find_packages(exclude=["tests"]),
     install_requires=[
-       'paho_mqtt',
-       'asyncmqtt',
-       'asynctelebot',
-       'bencode',
-       'tornado',
-       'jinja2',
-       'gpxpy',
-       'humanize'
+        'pytelegram_async>=0.1.0',
+        'paho_async>=0.1.0',
+        'tornado',
+        'gpxpy',
+        'bencode',
+        'jinja2',
+        'humanize',
+        'lxml',
+        'cssselect',
+    ],
+    dependency_links=[
+        'https://github.com/led-spb/pytelegram_async/tarball/master#egg=pytelegram_async-0.1.0',
+        'https://github.com/led-spb/paho_async/tarball/master#egg=paho_async-0.1.0',
     ],
     scripts=[
-        'bin/torrentbot-notify.sh'
+        'bin/torrentbot-notify.sh',
+        'bin/notify'
     ],
     entry_points={
        'console_scripts': [

@@ -19,8 +19,7 @@ from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 from tornado.ioloop import IOLoop, PeriodicCallback
 import tornado.web
 from tornado import gen
-from asynctelebot.telebot import Bot, BotRequestHandler, PatternMessageHandler
-from asynctelebot.entity import *
+from pytelegram_async.bot import Bot, BotRequestHandler, PatternMessageHandler
 from jinja2 import Environment
 
 

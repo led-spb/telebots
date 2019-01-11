@@ -1,9 +1,9 @@
+git+git://github.com/led-spb/pytelegram_async#egg=pytelegram_async-0.1.0
+git+git://github.com/led-spb/paho_async#egg=paho_async-0.1.0
 tornado
 bencode
+jinja2
+humanize
 lxml
 cssselect
-jinja2
 gpxpy
-humanize
-asyncmqtt
-asynctelebot

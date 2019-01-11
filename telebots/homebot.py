@@ -7,10 +7,10 @@ import logging
 import argparse
 import time
 import urlparse
-import asyncmqtt.client as mqtt
+import paho_async.client as mqtt
 from cStringIO import StringIO
-from asynctelebot.telebot import Bot, BotRequestHandler, PatternMessageHandler
-from asynctelebot.entity import *
+from pytelegram_async.bot import Bot, BotRequestHandler, PatternMessageHandler
+from pytelegram_async.entity import *
 from tornado.ioloop import IOLoop
 from tornado.httpclient import AsyncHTTPClient
 

@@ -1,0 +1,2 @@
+#!/bin/sh
+mosquitto_pub -t home/notify -s
