@@ -235,7 +235,7 @@ class NonameClub(TrackerHelper):
 
         # download
         url = "%sforum/download.php?id=%s&sid=%s" % (self.base_url, download_id, self.sid)
-        logging.debug("Start download %s", url)
+        logging.info("Found download url %s", url)
         request = HTTPRequest(
             url,
             headers=self.headers,
@@ -243,7 +243,7 @@ class NonameClub(TrackerHelper):
             connect_timeout=5, request_timeout=self.timeout
         )
         response = yield self.client.fetch(request, raise_error=False)
-        logging.info("Response code: %d %s", response.code, response.reason)
+        logging.debug("Response code: %d %s", response.code, response.reason)
         response.rethrow()
         raise gen.Return(response.body)
         pass
@@ -262,7 +262,7 @@ class NonameClub(TrackerHelper):
                 'f': u'-1', 'nm': query.encode('windows-1251'), 'submit_search': u'Поиск'.encode('windows-1251'),
             }), connect_timeout=5, request_timeout=self.timeout
         )
-        logging.debug("Make request to %s", url)
+        logging.info("Make search request to %s", url)
         response = yield self.client.fetch(request, raise_error=False)
         logging.debug("Response code: %d %s", response.code, response.reason)
 
