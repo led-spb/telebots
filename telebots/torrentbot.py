@@ -174,7 +174,7 @@ class NonameClub(TrackerHelper):
             connect_timeout=5, request_timeout=self.timeout
         )
         response = yield self.client.fetch(request, raise_error=False)
-        logging.info("Response code: %d %s", response.code, response.reason)
+        logging.debug("Response code: %d %s", response.code, response.reason)
         logging.debug("%s", str(response.headers))
         response.rethrow()
 
@@ -194,7 +194,7 @@ class NonameClub(TrackerHelper):
         )
         logging.info("Passing credentials to %s", self.base_url)
         response = yield self.client.fetch(request, raise_error=False)
-        logging.info("Response code: %d %s", response.code, response.reason)
+        logging.debug("Response code: %d %s", response.code, response.reason)
 
         response.rethrow()
         self.isAuth = self.check_auth(response.body)
@@ -207,14 +207,14 @@ class NonameClub(TrackerHelper):
     @gen.coroutine
     def download(self, url):
         if not self.isAuth or self.sid is None:
-            self.login()
+            yield self.login()
         logging.info("Find download url for %s", url)
 
         match = re.search(r'viewtopic\.php\?p=(\d+)$', url)
         if match:
             topic_id = match.group(1)
             url = "%sforum/viewtopic.php?p=%s" % (self.base_url, topic_id)
-            logging.info('URL rewited to %s', url)
+            logging.info('URL rewrited to %s', url)
 
         request = HTTPRequest(
             url + '&sid=%s' % self.sid,
@@ -243,7 +243,7 @@ class NonameClub(TrackerHelper):
             connect_timeout=5, request_timeout=self.timeout
         )
         response = yield self.client.fetch(request, raise_error=False)
-        logging.debug("Response code: %d %s", response.code, response.reason)
+        logging.info("Response code: %d %s", response.code, response.reason)
         response.rethrow()
         raise gen.Return(response.body)
         pass
