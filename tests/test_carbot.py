@@ -132,3 +132,39 @@ class TestCarBot:
         assert len(handler.bot.messages) == 1
         assert handler.bot.messages[0]['to'] == 3456
         assert isinstance(handler.bot.messages[0]['message'], pytelegram_async.entity.Venue)
+
+    def test_events_unauth(self, handler):
+        assert not handler.bot.exec_command(
+            message={
+                "from": {"id": handler.bot.admin + 1000},
+                "chat": {"id": -1},
+                "text": "/events"
+            }
+        )
+        assert len(handler.bot.messages) == 0
+
+
+    def test_events_common(self, handler):
+        assert handler.bot.exec_command(
+            message={
+                "from": {"id": handler.bot.admin},
+                "chat": {"id": 1234},
+                "text": "/events warn"
+            }
+        )
+        assert len(handler.bot.messages) == 1
+        assert handler.bot.messages[0]['to'] == 1234
+        assert not handler.subscriptions[1234]
+        handler.bot.clear()
+
+        assert handler.bot.exec_command(
+            message={
+                "from": {"id": handler.bot.admin},
+                "chat": {"id": 1234},
+                "text": "/events all"
+            }
+        )
+        assert len(handler.bot.messages) == 1
+        assert handler.bot.messages[0]['to'] == 1234
+        assert handler.subscriptions[1234]
+        assert not handler.subscriptions[4321]

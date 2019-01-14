@@ -33,6 +33,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.url = url
         self.devices = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: None)))
+        self.subscriptions = defaultdict(bool)
         self.ioloop = ioloop
         self.name = name
         self.low_battery = (10, 15)
@@ -60,6 +61,10 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
             username=url.username, password=url.password
         )
         pass
+
+    def assign_to(self, bot):
+        BotRequestHandler.assign_to(self, bot)
+        self.subscriptions.update({admin: False for admin in bot.admins})
 
     @staticmethod
     def human_date(value):
@@ -92,7 +97,8 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
                             msg = '<b>NORM</b> signal from %s is cached now' % device
 
                         self.logger.warn(msg)
-                        yield self.bot.send_message(to=chat_id, message=msg, parse_mode='HTML')
+
+                        yield self.notify_msg(chat_id, device, msg)
                         yield self.notify_info(chat_id, device)
                         yield self.notify_location(chat_id, device)
 
@@ -101,6 +107,36 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
         except Exception:
             self.logger.exception("Exception in activity job")
         return
+
+    @PatternMessageHandler("/events( .*)?", authorized=True)
+    def cmd_events(self, text, chat):
+        cmd = text.split()
+        if len(cmd) == 1:
+            buttons = [[
+                {'callback_data': '/events warn',
+                 'text': 'Warning events'},
+                {'callback_data': '/events all',
+                 'text': 'All events'}
+            ]]
+            listen_status = self.subscriptions[chat['id']]
+            self.bot.send_message(
+                to=chat['id'],
+                message='Currently notify <b>%s</b> events' % ('ALL' if listen_status else 'WARN'),
+                parse_mode='HTML', reply_markup={'inline_keyboard': buttons}
+            )
+        else:
+            if cmd[1] == 'all':
+                self.subscriptions[chat['id']] = True
+            elif cmd[1] == 'warn':
+                self.subscriptions[chat['id']] = False
+
+            listen_status = self.subscriptions[chat['id']]
+            self.bot.send_message(
+                to=chat['id'],
+                message='Currently notify <b>%s</b> events' % ('ALL' if listen_status else 'WARN'),
+                parse_mode='HTML'
+            )
+        return True
 
     @PatternMessageHandler("/track( .*)?", authorized=True)
     def cmd_track(self, text, chat):
@@ -132,9 +168,13 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
         return True
 
     @gen.coroutine
-    def notify_track(self, chat_id, track_name, gpx_file):
-        f = open(gpx_file, "rb")
-        track = gpxpy.parse(f)
+    def notify_track(self, chat_id, track_name, gpx):
+        if isinstance(gpx, gpxpy.gpx.GPX):
+            track = gpx
+        else:
+            f = open(gpx, "rb")
+            track = gpxpy.parse(f)
+
         track.name = track_name
         template = self.jinja.from_string(
             "<b>{{track.name}}</b>\n"
@@ -151,6 +191,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
             parse_mode='HTML'
         )
 
+        # TODO: Store/load image track to cache
         image = yield self.gpx_to_image(track)
         # send image
         self.bot.send_message(
@@ -260,18 +301,27 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
         f = open(os.path.join(self.track_path, filename), "wb")
         f.write(gpx.to_xml())
         f.close()
+
+        map( lambda item: self.notify_track(item[0], filename, gpx) if item[1] else None,
+             self.subscriptions.items())
         pass
 
     # noinspection PyUnusedLocal
     def on_msg(self, device, event_time, payload):
-        self.logger.info("Message from %s: %s", device, payload['text'])
+        message = payload['text']
+        self.logger.info("Message from %s: %s", device, message)
+        map(lambda item: self.notify_msg(item[0], device, message) if item[1] else None,
+            self.subscriptions.items())
         pass
+
+    def notify_msg(self, chat_id, device, message):
+        text = "<b>%s</b>\n" \
+               "%s" % (device, message)
+        return self.bot.send_message(to=chat_id, message=text, parse_mode='HTML')
 
     # noinspection PyUnresolvedReferences
     def on_location(self, device, event_time, payload):
         self.logger.info("Location for %s received", device)
-        chat_id = self.bot.admins[0]
-
         battery = payload['batt']
 
         last_charge = self.devices[device]['status']['charge'] or 0
@@ -279,18 +329,22 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
 
         if battery <= self.low_battery[0] and not low_battery:
             low_battery = True
-            msg = '<b>WARN</b> %s has low battery (%d%%)' % (device, battery)
-            self.logger.warn(msg)
-            self.bot.send_message(to=chat_id, message=msg, parse_mode='HTML')
+            msg = 'Has <b>low</b> battery (%d%%)' % battery
+            self.logger.warn(device+' '+msg)
+            map(lambda item: self.notify_msg(item, device, msg),
+                self.subscriptions.keys())
         if battery >= self.low_battery[1] and low_battery:
             low_battery = False
-            msg = '<b>NORM</b> %s has norm battery (%d%%)' % (device, battery)
-            self.logger.info(msg)
-            self.bot.send_message(to=chat_id, message=msg, parse_mode='HTML')
+            msg = 'Has <b>norm</b> battery (%d%%)' % battery
+            self.logger.warn(device+' '+msg)
+            map(lambda item: self.notify_msg(item, device, msg),
+                self.subscriptions.keys())
 
         if last_charge != payload['charge']:
             msg = 'Ignition changed to %s' % ('ON' if payload['charge'] > 0 else 'OFF')
             self.logger.warn(msg)
+            map(lambda item: self.notify_msg(item[0], device, msg) if item[1] else None,
+                self.subscriptions.items())
             pass
 
         distance = 0
@@ -300,8 +354,8 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
                 last_location[0], last_location[1], None, payload['lat'], payload['lon'], None
             )
 
-        if distance > 500:
-            self.notify_location(chat_id, device)
+        map(lambda item: self.notify_location(item[0], device) if distance > 500 or item[1] else None,
+            self.subscriptions.items())
 
         self.devices[device]['status']['low_batt'] = low_battery
         self.devices[device]['status']['location_date'] = event_time
