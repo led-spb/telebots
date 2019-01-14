@@ -812,8 +812,6 @@ def main():
     trackers = [TrackerHelper.subclass_for(url)(url, params.proxy) for url in params.helper if
                 TrackerHelper.subclass_for(url) is not None]
     logging.info("tracker support loaded: %s", ",".join([str(tr.name) for tr in trackers]))
-    #for tracker in trackers:
-    #    tracker.login()
 
     manager_class = TorrentManager.subclass_for(params.manager)
     if manager_class is None:

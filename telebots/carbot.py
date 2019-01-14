@@ -278,7 +278,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
                         message=Venue(
                             latitude=data['location']['lat'],
                             longitude=data['location']['lon'],
-                            title=dev, address="Unknown"
+                            title=dev, address=''
                         )
                     )
                 )
