@@ -13,6 +13,7 @@ from pytelegram_async.bot import Bot, BotRequestHandler, PatternMessageHandler
 from pytelegram_async.entity import *
 from tornado.ioloop import IOLoop
 from tornado.httpclient import AsyncHTTPClient
+import telebots
 
 
 class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
@@ -37,6 +38,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
             self, ioloop=ioloop, host=mqtt_url.hostname, port=mqtt_url.port if mqtt_url.port is not None else 1883,
             username=mqtt_url.username, password=mqtt_url.password
         )
+        self.version = telebots.version
         pass
 
     def on_mqtt_connect(self, client, obj, flags, rc):

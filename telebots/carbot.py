@@ -18,7 +18,7 @@ from pytelegram_async.entity import *
 from jinja2 import Environment
 import humanize
 from collections import defaultdict
-
+import telebots
 
 def json_serial(obj):
     if isinstance(obj, (datetime.datetime, datetime.date)):
@@ -50,6 +50,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
         self.jinja.filters['human_date'] = self.human_date
         self.jinja.filters['human_timedelta'] = self.human_timedelta
         self.activity_check_interval = datetime.timedelta(seconds=323)
+        self.version = telebots.version
 
         self.activity_task = PeriodicCallback(self.activity_job, self.activity_check_interval.seconds*1000)
         self.activity_task.start()
@@ -468,3 +469,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

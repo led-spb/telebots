@@ -1,3 +1,4 @@
+import telebots
 from telebots.carbot import CarMonitor
 import pytelegram_async.entity
 import pytest
@@ -43,6 +44,18 @@ class TestCarBot:
         )
         yield monitor
 
+    def test_version(self, handler):
+        assert handler.bot.exec_command(
+            message={
+                "from": {"id": handler.bot.admin},
+                "chat": {"id": 1234},
+                "text": "/version"
+            }
+        )
+        assert len(handler.bot.messages) == 1
+        assert handler.bot.messages[0]['to'] == 1234
+        assert handler.bot.messages[0]['message'] == str(telebots.version)
+
     def test_track_unauth(self, handler):
         assert not handler.bot.exec_command(
             message={
@@ -52,6 +65,7 @@ class TestCarBot:
             }
         )
         assert len(handler.bot.messages) == 0
+
 
     def test_track_common(self, handler):
         assert handler.bot.exec_command(

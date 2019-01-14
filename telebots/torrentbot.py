@@ -21,6 +21,7 @@ import tornado.web
 from tornado import gen
 from pytelegram_async.bot import Bot, BotRequestHandler, PatternMessageHandler
 from jinja2 import Environment
+import telebots
 
 
 class Renderer(object):
@@ -532,6 +533,7 @@ class UpdateChecker(BotRequestHandler):
         )
         self.cache = []
         self.update_task = PeriodicCallback(self.do_update, 15 * 60 * 1000)
+        self.version = telebots.version
         pass
 
     @PatternMessageHandler('/show( .*)?', authorized=True)
