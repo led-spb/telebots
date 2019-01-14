@@ -143,12 +143,15 @@ class NonameClub(TrackerHelper):
         self.isAuth = False
         self.sid = None
         self.client = AsyncHTTPClient()
+        self.timeout = 40
         pass
 
     def check_auth(self, body):
-        # f = open("login.dat","w")
-        # f.write(body)
-        # f.close()
+        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+            with open("login.dat","w") as f:
+                f.write(body)
+                f.close()
+
         m = re.search(r'<a\s+href="login\.php\?logout=true&amp;sid=(.*?)"', body, re.I + re.M)
         status = False
         if m is not None:
@@ -163,12 +166,12 @@ class NonameClub(TrackerHelper):
         if self.isAuth:
             return
         url = '%sforum/login.php' % self.base_url
-        logging.info("Initial connect to %s", self.base_url)
+        logging.info("Unauthorized, start connection to %s", url)
         request = HTTPRequest(
             url,
             headers=self.headers,
             method='GET',
-            connect_timeout=5, request_timeout=20
+            connect_timeout=5, request_timeout=self.tmeout
         )
         response = yield self.client.fetch(request, raise_error=False)
         logging.info("Response code: %d %s", response.code, response.reason)
@@ -187,7 +190,7 @@ class NonameClub(TrackerHelper):
 
         request = HTTPRequest(
             url, headers=self.headers, method='POST', body=urllib.urlencode(login_data),
-            connect_timeout=5, request_timeout=60
+            connect_timeout=5, request_timeout=self.tmeout
         )
         logging.info("Passing credentials to %s", self.base_url)
         response = yield self.client.fetch(request, raise_error=False)
@@ -205,13 +208,19 @@ class NonameClub(TrackerHelper):
     def download(self, url):
         if not self.isAuth or self.sid is None:
             self.login()
+        logging.info("Find download url for %s", url)
 
-        logging.info("Start download %s", url)
+        match = re.search(r'viewtopic\.php\?p=(\d+)$', url)
+        if match:
+            topic_id = match.group(1)
+            url = "%sforum/viewtopic.php?p=%s" % (self.base_url, topic_id)
+            logging.info('URL rewited to %s', url)
+
         request = HTTPRequest(
             url + '&sid=%s' % self.sid,
             headers=self.headers,
             method='GET',
-            connect_timeout=5, request_timeout=20
+            connect_timeout=5, request_timeout=self.tmeout
         )
         response = yield self.client.fetch(request, raise_error=False)
         logging.debug("Response code: %d %s", response.code, response.reason)
@@ -222,7 +231,7 @@ class NonameClub(TrackerHelper):
             download_id = match.group(1)
         else:
             self.isAuth = False
-            raise Exception("Could not find download id")
+            raise Exception("Could not find download url")
 
         # download
         url = "%sforum/download.php?id=%s&sid=%s" % (self.base_url, download_id, self.sid)
@@ -231,7 +240,7 @@ class NonameClub(TrackerHelper):
             url,
             headers=self.headers,
             method='GET',
-            connect_timeout=5, request_timeout=20
+            connect_timeout=5, request_timeout=self.tmeout
         )
         response = yield self.client.fetch(request, raise_error=False)
         logging.debug("Response code: %d %s", response.code, response.reason)
@@ -251,7 +260,7 @@ class NonameClub(TrackerHelper):
             method='POST',
             body=urllib.urlencode({
                 'f': u'-1', 'nm': query.encode('windows-1251'), 'submit_search': u'Поиск'.encode('windows-1251'),
-            }), connect_timeout=5, request_timeout=10
+            }), connect_timeout=5, request_timeout=self.tmeout
         )
         logging.debug("Make request to %s", url)
         response = yield self.client.fetch(request, raise_error=False)
