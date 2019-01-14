@@ -132,7 +132,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
 
     @gen.coroutine
     def notify_track(self, chat_id, track_name, gpx_file):
-        f= open(gpx_file, "rb")
+        f = open(gpx_file, "rb")
         track = gpxpy.parse(f)
         track.name = track_name
         template = self.jinja.from_string(
@@ -140,13 +140,14 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
             "distance: {{ '%.2f' | format(track.get_moving_data().moving_distance / 1000) }} km\n"
             "moving time: {{ track.get_moving_data().moving_time | human_timedelta }}\n"
             "stopped time: {{ track.get_moving_data().stopped_time | human_timedelta }}\n"
-            "max speed: {{ '%.2f' | format(track.get_moving_data().max_speed * 3600. / 1000.) }} km/h\n"
+            "max speed: {{ '%.2f' | format(track.get_moving_data().max_speed*3600/1000) }} km/h\n"
             "avg speed: {{ '%.2f' | "
-            "format(track.get_moving_data().moving_distance/track.get_moving_data().moving_time*3600./1000.) }} km/h"
+            "format(track.get_moving_data().moving_distance/track.get_moving_data().moving_time*3600/1000) }} km/h"
         )
         yield self.bot.send_message(
             to=chat_id,
-            message=template.render(track=track)
+            message=template.render(track=track),
+            parse_mode='HTML'
         )
 
         image = yield self.gpx_to_image(track)
