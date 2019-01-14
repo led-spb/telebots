@@ -171,7 +171,7 @@ class NonameClub(TrackerHelper):
             url,
             headers=self.headers,
             method='GET',
-            connect_timeout=5, request_timeout=self.tmeout
+            connect_timeout=5, request_timeout=self.timeout
         )
         response = yield self.client.fetch(request, raise_error=False)
         logging.info("Response code: %d %s", response.code, response.reason)
@@ -190,7 +190,7 @@ class NonameClub(TrackerHelper):
 
         request = HTTPRequest(
             url, headers=self.headers, method='POST', body=urllib.urlencode(login_data),
-            connect_timeout=5, request_timeout=self.tmeout
+            connect_timeout=5, request_timeout=self.timeout
         )
         logging.info("Passing credentials to %s", self.base_url)
         response = yield self.client.fetch(request, raise_error=False)
@@ -220,7 +220,7 @@ class NonameClub(TrackerHelper):
             url + '&sid=%s' % self.sid,
             headers=self.headers,
             method='GET',
-            connect_timeout=5, request_timeout=self.tmeout
+            connect_timeout=5, request_timeout=self.timeout
         )
         response = yield self.client.fetch(request, raise_error=False)
         logging.debug("Response code: %d %s", response.code, response.reason)
@@ -240,7 +240,7 @@ class NonameClub(TrackerHelper):
             url,
             headers=self.headers,
             method='GET',
-            connect_timeout=5, request_timeout=self.tmeout
+            connect_timeout=5, request_timeout=self.timeout
         )
         response = yield self.client.fetch(request, raise_error=False)
         logging.debug("Response code: %d %s", response.code, response.reason)
@@ -260,7 +260,7 @@ class NonameClub(TrackerHelper):
             method='POST',
             body=urllib.urlencode({
                 'f': u'-1', 'nm': query.encode('windows-1251'), 'submit_search': u'Поиск'.encode('windows-1251'),
-            }), connect_timeout=5, request_timeout=self.tmeout
+            }), connect_timeout=5, request_timeout=self.timeout
         )
         logging.debug("Make request to %s", url)
         response = yield self.client.fetch(request, raise_error=False)
