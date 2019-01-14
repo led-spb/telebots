@@ -18,7 +18,9 @@ from pytelegram_async.entity import *
 from jinja2 import Environment
 import humanize
 from collections import defaultdict
+import cachetools
 import telebots
+
 
 def json_serial(obj):
     if isinstance(obj, (datetime.datetime, datetime.date)):
@@ -55,6 +57,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
 
         self.activity_task = PeriodicCallback(self.activity_job, self.activity_check_interval.seconds*1000)
         self.activity_task.start()
+        self.tracks_cache = cachetools.LRUCache(maxsize=32)
 
         mqtt.TornadoMqttClient.__init__(
             self, ioloop=ioloop, host=url.hostname, port=url.port if url.port is not None else 1883,
@@ -185,14 +188,16 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
             "avg speed: {{ '%.2f' | "
             "format(track.get_moving_data().moving_distance/track.get_moving_data().moving_time*3600/1000) }} km/h"
         )
-        yield self.bot.send_message(
+        self.bot.send_message(
             to=chat_id,
             message=template.render(track=track),
             parse_mode='HTML'
         )
+        image = self.tracks_cache.get(track_name)
+        if image is None:
+            image = yield self.gpx_to_image(track)
+            self.tracks_cache[track_name] = image
 
-        # TODO: Store/load image track to cache
-        image = yield self.gpx_to_image(track)
         # send image
         self.bot.send_message(
             to=chat_id,
