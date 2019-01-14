@@ -28,7 +28,7 @@ def json_serial(obj):
 
 class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
 
-    def __init__(self, ioloop, url, name, api_key=None):
+    def __init__(self, ioloop, url, name, track_path, api_key=None):
         BotRequestHandler.__init__(self)
         self.logger = logging.getLogger(self.__class__.__name__)
         self.url = url
@@ -37,6 +37,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
         self.name = name
         self.low_battery = (10, 15)
         self.api_key = api_key
+        self.track_path = track_path
         self.track2img = 'https://open.mapquestapi.com/staticmap/v4/getmap?key={api_key}&size=600,600&'\
                          'type=map&imagetype=png&declutter=true&shapeformat=cmp&shape={shape}&'\
                          'bestfit={lat_min},{lon_min},{lat_max},{lon_max}&scalebar=false&'\
@@ -47,6 +48,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
         self.msg_expire_delta = datetime.timedelta(minutes=15)
         self.jinja = Environment()
         self.jinja.filters['human_date'] = self.human_date
+        self.jinja.filters['human_timedelta'] = self.human_timedelta
         self.activity_check_interval = datetime.timedelta(seconds=323)
 
         self.activity_task = PeriodicCallback(self.activity_job, self.activity_check_interval.seconds*1000)
@@ -61,6 +63,12 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
     @staticmethod
     def human_date(value):
         return humanize.naturaltime(value)
+
+    @staticmethod
+    def human_timedelta(value):
+        if isinstance(value, int):
+            value = datetime.timedelta(seconds=value)
+        return humanize.naturaldelta(value)
 
     # noinspection PyBroadException
     @gen.coroutine
@@ -96,60 +104,76 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
     @PatternMessageHandler("/track( .*)?", authorized=True)
     def cmd_track(self, text, chat):
         cmd = text.split()
+        has_file = False
+        mask = ''
+        if len(cmd) > 1:
+            try:
+                os.stat(os.path.join(self.track_path, cmd[1]))
+                has_file = True
+            except OSError:
+                mask = cmd[1]
+                pass
 
-        @gen.coroutine
-        def execute():
-            has_file = False
-            mask = ''
-            if len(cmd) > 1:
-                try:
-                    os.stat(cmd[1])
-                    has_file = True
-                except OSError:
-                    mask = cmd[1]
-                    pass
-
-            if not has_file:
-                files = sorted([x for x in os.listdir('.')
-                                if re.match(r'.*%s.*\.gpx' % mask, x)], reverse=True)[:10]
-                buttons = [[{
-                    'callback_data': '/track '+fname,
-                    'text': fname
-                }] for fname in files]
-                self.bot.send_message(
-                    to=chat['id'],
-                    message='which track?' if len(files) > 0 else 'No tracks',
-                    reply_markup={'inline_keyboard': buttons}
-                )
-            else:
-                image = yield self.gpx_to_image(cmd[1])
-                # send image
-                self.bot.send_message(
-                    to=chat['id'],
-                    message=Photo(
-                        photo=File('image.png', StringIO(image), 'image/png'),
-                        caption=cmd[1]
-                    )
-                )
-            return
-        execute()
+        if not has_file:
+            files = sorted([x for x in os.listdir(self.track_path)
+                            if re.match(r'.*%s.*\.gpx' % mask, x)], reverse=True)[:10]
+            buttons = [[{
+                'callback_data': '/track '+fname,
+                'text': fname
+            }] for fname in files]
+            self.bot.send_message(
+                to=chat['id'],
+                message='which track?' if len(files) > 0 else 'No tracks',
+                reply_markup={'inline_keyboard': buttons}
+            )
+        else:
+            self.notify_track(chat['id'], cmd[1], os.path.join(self.track_path,cmd[1]))
         return True
 
     @gen.coroutine
-    def gpx_to_image(self, gpx_file):
-        with open(gpx_file, "r") as infile:
-            gpx = gpxpy.parse(infile)
-            data = self.encode_track(gpx)
-            data['api_key'] = self.api_key
-            url = self.track2img.format(**data)
-            logging.debug(url)
+    def notify_track(self, chat_id, track_name, gpx_file):
+        f = open(gpx_file, "rb")
+        track = gpxpy.parse(f)
+        track.name = track_name
+        template = self.jinja.from_string(
+            "<b>{{track.name}}</b>\n"
+            "distance: {{ '%.2f' | format(track.get_moving_data().moving_distance / 1000) }} km\n"
+            "moving time: {{ track.get_moving_data().moving_time | human_timedelta }}\n"
+            "stopped time: {{ track.get_moving_data().stopped_time | human_timedelta }}\n"
+            "max speed: {{ '%.2f' | format(track.get_moving_data().max_speed*3600/1000) }} km/h\n"
+            "avg speed: {{ '%.2f' | "
+            "format(track.get_moving_data().moving_distance/track.get_moving_data().moving_time*3600/1000) }} km/h"
+        )
+        yield self.bot.send_message(
+            to=chat_id,
+            message=template.render(track=track),
+            parse_mode='HTML'
+        )
 
-            response = yield self.client.fetch(url, raise_error=False)
-            logging.debug("Response code: %d %s", response.code, response.reason)
-            logging.debug("%s", str(response.headers))
-            response.rethrow()
-            raise gen.Return(response.body)
-            pass
+        image = yield self.gpx_to_image(track)
+        # send image
+        self.bot.send_message(
+            to=chat_id,
+            message=Photo(
+                photo=File('image.png', StringIO(image), 'image/png'),
+                caption=track_name
+            )
+        )
+        raise gen.Return()
+
+    @gen.coroutine
+    def gpx_to_image(self, gpx):
+        data = self.encode_track(gpx)
+        data['api_key'] = self.api_key
+        url = self.track2img.format(**data)
+        logging.debug(url)
+
+        response = yield self.client.fetch(url, raise_error=False)
+        logging.debug("Response code: %d %s", response.code, response.reason)
+        logging.debug("%s", str(response.headers))
+        response.rethrow()
+        raise gen.Return(response.body)
+        pass
 
     @PatternMessageHandler("/debug", authorized=True)
     def cmd_debug(self, message=None):
@@ -232,7 +256,7 @@ class CarMonitor(mqtt.TornadoMqttClient, BotRequestHandler):
         self.logger.info("Storing track to %s", filename)
 
         gpx = self.track_to_gpx(payload["track"])
-        f = open(filename, "wb")
+        f = open(os.path.join(self.track_path, filename), "wb")
         f.write(gpx.to_xml())
         f.close()
         pass
@@ -411,6 +435,7 @@ def main():
     parser.add_argument("-n", "--name", default="+")
     parser.add_argument("--token", help="Telegram API bot token")
     parser.add_argument("--key", help="MapQuest API key")
+    parser.add_argument("--store", help="Tracks store path", default=".")
     parser.add_argument("--admin", nargs="+", type=int, help="Bot admin", dest="admins")
     parser.add_argument("-u", "--url", default="mqtt://localhost:1883", type=urlparse.urlparse)
     parser.add_argument("-v", action="store_true", default=False, help="Verbose logging", dest="verbose")
@@ -426,7 +451,7 @@ def main():
     ioloop = IOLoop.instance()
 
     bot = Bot(args.token, args.admins)
-    monitor = CarMonitor(ioloop, args.url, args.name, args.key)
+    monitor = CarMonitor(ioloop=ioloop, url=args.url, name=args.name, track_path=args.store, api_key=args.key)
     bot.add_handler(monitor)
 
     monitor.start()
