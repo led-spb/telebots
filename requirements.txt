@@ -7,3 +7,4 @@ humanize
 lxml
 cssselect
 gpxpy
+pytest

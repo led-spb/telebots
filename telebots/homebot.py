@@ -27,7 +27,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         self.http_client = AsyncHTTPClient()
 
         host = mqtt_url.hostname
-        port = mqtt_url.port if mqtt_url is not None else 1883
+        port = mqtt_url.port if mqtt_url.port is not None else 1883
 
         self.logger.info("Trying connect to MQTT broker at %s:%d" %
                          (host, port))
@@ -50,19 +50,19 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
                 client.subscribe(topic)
         pass
 
-    def on_mqtt_message(self, client, obj, msg):
-        if msg.retain:
+    def on_mqtt_message(self, client, obj, message):
+        if message.retain:
             return
 
         self.logger.info("topic %s, payload: %s" % (
-            msg.topic,
-            "[binary]" if len(msg.payload) > 10 else msg.payload
+            message.topic,
+            "[binary]" if len(message.payload) > 10 else message.payload
         ))
-        path = msg.topic.split('/')[1:]
+        path = message.topic.split('/')[1:]
         event = path[0]
         self.logger.debug("Event %s path: %s" % (event, repr(path[1:])))
 
-        self.exec_event(event, path[1:], msg.payload)
+        self.exec_event(event, path[1:], message.payload)
         pass
 
     def exec_event(self, name, path, payload):
@@ -126,7 +126,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         if event_type == 'photo':
             markup = None
             if not self.subscribe:
-                markup= {
+                markup = {
                         'inline_keyboard': [[{
                             'text': 'Subscribe',
                             'callback_data': '/sub'
