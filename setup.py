@@ -18,6 +18,7 @@ setuptools.setup(
         'humanize',
         'lxml',
         'cssselect',
+        'cachetools'
     ],
     dependency_links=[
         'https://github.com/led-spb/pytelegram_async/tarball/master#egg=pytelegram_async-0.1.0',

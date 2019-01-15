@@ -21,6 +21,7 @@ import tornado.web
 from tornado import gen
 from pytelegram_async.bot import Bot, BotRequestHandler, PatternMessageHandler
 from jinja2 import Environment
+import telebots
 
 
 class Renderer(object):
@@ -143,12 +144,15 @@ class NonameClub(TrackerHelper):
         self.isAuth = False
         self.sid = None
         self.client = AsyncHTTPClient()
+        self.timeout = 40
         pass
 
     def check_auth(self, body):
-        # f = open("login.dat","w")
-        # f.write(body)
-        # f.close()
+        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+            with open("login.dat","w") as f:
+                f.write(body)
+                f.close()
+
         m = re.search(r'<a\s+href="login\.php\?logout=true&amp;sid=(.*?)"', body, re.I + re.M)
         status = False
         if m is not None:
@@ -163,15 +167,15 @@ class NonameClub(TrackerHelper):
         if self.isAuth:
             return
         url = '%sforum/login.php' % self.base_url
-        logging.info("Initial connect to %s", self.base_url)
+        logging.info("Unauthorized, start connection to %s", url)
         request = HTTPRequest(
             url,
             headers=self.headers,
             method='GET',
-            connect_timeout=5, request_timeout=20
+            connect_timeout=5, request_timeout=self.timeout
         )
         response = yield self.client.fetch(request, raise_error=False)
-        logging.info("Response code: %d %s", response.code, response.reason)
+        logging.debug("Response code: %d %s", response.code, response.reason)
         logging.debug("%s", str(response.headers))
         response.rethrow()
 
@@ -187,11 +191,11 @@ class NonameClub(TrackerHelper):
 
         request = HTTPRequest(
             url, headers=self.headers, method='POST', body=urllib.urlencode(login_data),
-            connect_timeout=5, request_timeout=60
+            connect_timeout=5, request_timeout=self.timeout
         )
         logging.info("Passing credentials to %s", self.base_url)
         response = yield self.client.fetch(request, raise_error=False)
-        logging.info("Response code: %d %s", response.code, response.reason)
+        logging.debug("Response code: %d %s", response.code, response.reason)
 
         response.rethrow()
         self.isAuth = self.check_auth(response.body)
@@ -204,14 +208,20 @@ class NonameClub(TrackerHelper):
     @gen.coroutine
     def download(self, url):
         if not self.isAuth or self.sid is None:
-            self.login()
+            yield self.login()
+        logging.info("Find download url for %s", url)
 
-        logging.info("Start download %s", url)
+        match = re.search(r'viewtopic\.php\?p=(\d+)$', url)
+        if match:
+            topic_id = match.group(1)
+            url = "%sforum/viewtopic.php?p=%s" % (self.base_url, topic_id)
+            logging.info('URL rewrited to %s', url)
+
         request = HTTPRequest(
             url + '&sid=%s' % self.sid,
             headers=self.headers,
             method='GET',
-            connect_timeout=5, request_timeout=20
+            connect_timeout=5, request_timeout=self.timeout
         )
         response = yield self.client.fetch(request, raise_error=False)
         logging.debug("Response code: %d %s", response.code, response.reason)
@@ -222,16 +232,16 @@ class NonameClub(TrackerHelper):
             download_id = match.group(1)
         else:
             self.isAuth = False
-            raise Exception("Could not find download id")
+            raise Exception("Could not find download url")
 
         # download
         url = "%sforum/download.php?id=%s&sid=%s" % (self.base_url, download_id, self.sid)
-        logging.debug("Start download %s", url)
+        logging.info("Found download url %s", url)
         request = HTTPRequest(
             url,
             headers=self.headers,
             method='GET',
-            connect_timeout=5, request_timeout=20
+            connect_timeout=5, request_timeout=self.timeout
         )
         response = yield self.client.fetch(request, raise_error=False)
         logging.debug("Response code: %d %s", response.code, response.reason)
@@ -251,9 +261,9 @@ class NonameClub(TrackerHelper):
             method='POST',
             body=urllib.urlencode({
                 'f': u'-1', 'nm': query.encode('windows-1251'), 'submit_search': u'Поиск'.encode('windows-1251'),
-            }), connect_timeout=5, request_timeout=10
+            }), connect_timeout=5, request_timeout=self.timeout
         )
-        logging.debug("Make request to %s", url)
+        logging.info("Make search request to %s", url)
         response = yield self.client.fetch(request, raise_error=False)
         logging.debug("Response code: %d %s", response.code, response.reason)
 
@@ -523,6 +533,7 @@ class UpdateChecker(BotRequestHandler):
         )
         self.cache = []
         self.update_task = PeriodicCallback(self.do_update, 15 * 60 * 1000)
+        self.version = telebots.version
         pass
 
     @PatternMessageHandler('/show( .*)?', authorized=True)
@@ -801,8 +812,6 @@ def main():
     trackers = [TrackerHelper.subclass_for(url)(url, params.proxy) for url in params.helper if
                 TrackerHelper.subclass_for(url) is not None]
     logging.info("tracker support loaded: %s", ",".join([str(tr.name) for tr in trackers]))
-    #for tracker in trackers:
-    #    tracker.login()
 
     manager_class = TorrentManager.subclass_for(params.manager)
     if manager_class is None:
