@@ -64,7 +64,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
     def human_date(value):
         if isinstance(value, float) or isinstance(value, int):
             value = datetime.datetime.fromtimestamp(value)
-        return humanize.naturaldate(value)
+        return humanize.naturaltime(value)
 
     def on_mqtt_connect(self, client, obj, flags, rc):
         self.logger.info("MQTT broker: %s", mqtt.connack_string(rc))
