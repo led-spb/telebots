@@ -15,7 +15,8 @@ class TestHomeBot:
 
         handler = HomeBotHandler(
             ioloop=None,
-            mqtt_url=urlparse.urlparse('mqtt://dummy/')
+            mqtt_url=urlparse.urlparse('mqtt://dummy/'),
+            sensors=["test", "qwerty?"]
         )
         bot.add_handler(handler)
         yield handler
@@ -61,6 +62,27 @@ class TestHomeBot:
         assert handler.bot.messages[0]['to'] == handler.bot.admin
         assert isinstance(handler.bot.messages[0]['message'], pytelegram_async.entity.Photo)
 
+    def test_status_common(self, handler):
+        message = DummyMqttMessage()
+        message.retain = False
+        message.topic = 'home/sensor/test'
+        message.payload = '1'
+        handler.on_mqtt_message(None, None, message)
+        assert len(handler.bot.messages) == 1
+        assert handler.bot.messages[0]['to'] == handler.bot.admin
+        handler.bot.clear()
+
+        assert handler.bot.exec_command(
+            message={
+                "from": {"id": handler.bot.admin},
+                "chat": {"id": 1234},
+                "text": "/status"
+            }
+        )
+
+        assert len(handler.bot.messages) == len(handler.bot.admins)
+        assert handler.bot.messages[0]['to'] == 1234
+
     def test_video_unauth(self, handler):
         assert not handler.bot.exec_command(
             message={
@@ -77,6 +99,16 @@ class TestHomeBot:
                 "from": {"id": handler.bot.admin + 1000},
                 "chat": {"id": -1},
                 "text": "/sub"
+            }
+        )
+        assert len(handler.bot.messages) == 0
+
+    def test_status_unauth(self, handler):
+        assert not handler.bot.exec_command(
+            message={
+                "from": {"id": handler.bot.admin + 1000},
+                "chat": {"id": -1},
+                "text": "/status"
             }
         )
         assert len(handler.bot.messages) == 0
@@ -143,7 +175,6 @@ class TestHomeBot:
         assert len(handler.bot.messages) == 1
         assert handler.bot.messages[0]['to'] == handler.bot.admin
         assert isinstance(handler.bot.messages[0]['message'], pytelegram_async.entity.Video)
-
 
     def test_event_sensor(self, handler):
         message = DummyMqttMessage()

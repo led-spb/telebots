@@ -1,2 +1,2 @@
 name = 'telebots'
-version = "0.2.0-release"
+version = "0.2.1-dev"

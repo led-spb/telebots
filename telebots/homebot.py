@@ -6,6 +6,7 @@ import os.path
 import logging
 import argparse
 import time
+import datetime
 import urlparse
 import paho_async.client as mqtt
 from cStringIO import StringIO
@@ -13,7 +14,20 @@ from pytelegram_async.bot import Bot, BotRequestHandler, PatternMessageHandler
 from pytelegram_async.entity import *
 from tornado.ioloop import IOLoop
 from tornado.httpclient import AsyncHTTPClient
+from jinja2 import Environment
+import humanize
 import telebots
+
+
+class Sensor(object):
+    __slots__ = ['name', 'state', 'changed', 'silence']
+
+    def __init__(self, name, silence=False):
+        self.name = name
+        self.state = 0
+        self.changed = 0
+        self.silence = silence
+        pass
 
 
 class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
@@ -21,11 +35,13 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         BotRequestHandler.__init__(self)
         self.logger = logging.getLogger(self.__class__.__name__)
         self.ioloop = ioloop
-        self.sensors = sensors or []
+        self.sensors = {name.strip('?'): Sensor(name.strip('?'), name.endswith('?')) for name in sensors or []}
         self.cameras = cameras or []
         self.event_gap = 300
-        self.events = {}
         self.http_client = AsyncHTTPClient()
+
+        self.jinja = Environment()
+        self.jinja.filters['human_date'] = self.human_date
 
         host = mqtt_url.hostname
         port = mqtt_url.port if mqtt_url.port is not None else 1883
@@ -41,11 +57,17 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         self.version = telebots.version
         pass
 
+    @staticmethod
+    def human_date(value):
+        if isinstance(value, float):
+            value = datetime.datetime.fromtimestamp(value)
+        return humanize.naturaldate(value)
+
     def on_mqtt_connect(self, client, obj, flags, rc):
         self.logger.info("MQTT broker: %s", mqtt.connack_string(rc))
         if rc == 0:
             topics = ["home/notify"] + \
-                     ["home/sensor/%s" % x for x in self.sensors] + \
+                     ["home/sensor/%s" % x for x in self.sensors.keys()] + \
                      ["home/camera/%s/#" % x for x in self.cameras]
             for topic in topics:
                 self.logger.debug("Subscribe for topic %s" % topic)
@@ -122,6 +144,22 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
             )
         return True
 
+    @PatternMessageHandler("/status", authorized=True)
+    def cmd_status(self, chat):
+
+        template = self.jinja.from_string(
+            "{% for sensor in sensors %}<b>{{sensor.name}}</b>\n"
+            "state: {{ 'ON' if sensor.state > 0 else 'OFF'}}\n"
+            "changed: {{ sensor.changed | human_date }}\n\n"
+            "{% endfor %}"
+        )
+        self.bot.send_message(
+            to=chat['id'],
+            message=template.render(sensors = self.sensors.values()),
+            parse_mode='HTML'
+        )
+        return True
+
     def event_camera(self, path, payload):
         cam_no = path[0]
         event_type = path[1]
@@ -165,18 +203,20 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         pass
 
     def event_sensor(self, path, payload):
-        sensor = path[0]
-        value = payload
+        name = path[0]
+        status = int(payload)
         now = time.time()
 
-        if int(value) > 0 and \
-           (sensor not in self.events or
-           (now-self.events[sensor]) > self.event_gap):
-            self.events[sensor] = now
-            for chat_id in self.bot.admins:
-                self.bot.send_message(
-                   to=chat_id, message="%s: alert %s" % (sensor, time.strftime("%d.%m %H:%M"))
-                )
+        sensor = self.sensors[name]
+        sensor.state = status
+
+        if status > 0 and (now-sensor.changed) > self.event_gap:
+            sensor.changed = now
+            if not sensor.silence:
+                for chat_id in self.bot.admins:
+                    self.bot.send_message(
+                       to=chat_id, message="%s: alert %s" % (sensor.name, time.strftime("%d.%m %H:%M"))
+                    )
         pass
 
 

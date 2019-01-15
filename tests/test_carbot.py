@@ -77,7 +77,7 @@ class TestCarBot:
         )
         assert len(handler.bot.messages) == 1
         assert handler.bot.messages[0]['to'] == 1234
-        assert handler.bot.messages[0]['message'] == 'which track?'
+        assert handler.bot.messages[0]['message'] == 'No tracks'
 
     def test_track_wrong_track(self, handler):
         assert handler.bot.exec_command(
