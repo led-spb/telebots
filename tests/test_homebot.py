@@ -198,4 +198,3 @@ class TestHomeBot:
         message.payload = '1'
         handler.on_mqtt_message(None, None, message)
         assert len(handler.bot.messages) == 0
-

@@ -66,7 +66,6 @@ class TestCarBot:
         )
         assert len(handler.bot.messages) == 0
 
-
     def test_track_common(self, handler):
         assert handler.bot.exec_command(
             message={
