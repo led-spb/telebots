@@ -68,7 +68,7 @@ class TestHomeBot:
         message.topic = 'home/sensor/test'
         message.payload = '1'
         handler.on_mqtt_message(None, None, message)
-        assert len(handler.bot.messages) == 1
+        assert len(handler.bot.messages) == len(handler.bot.admins)
         assert handler.bot.messages[0]['to'] == handler.bot.admin
         handler.bot.clear()
 
@@ -79,8 +79,7 @@ class TestHomeBot:
                 "text": "/status"
             }
         )
-
-        assert len(handler.bot.messages) == len(handler.bot.admins)
+        assert len(handler.bot.messages) == len(handler.bot.admins)*len(handler.sensors)
         assert handler.bot.messages[0]['to'] == 1234
 
     def test_video_unauth(self, handler):
