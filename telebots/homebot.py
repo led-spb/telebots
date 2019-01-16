@@ -63,7 +63,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
             sensor_type = parsed.scheme
             name = parsed.username
 
-            self.sensors[topic] = Sensor(topic=topic, sensor_type=sensor_type, name=name.strip('?'), silence=name.endswith('?'))
+            self.sensors[topic] = Sensor(topic=topic, sensor_type=sensor_type, name=name.strip('!'), silence=name.endswith('!'))
 
         self.cameras = cameras or []
         self.event_gap = 300
