@@ -16,7 +16,7 @@ class TestHomeBot:
         handler = HomeBotHandler(
             ioloop=None,
             mqtt_url=urlparse.urlparse('mqtt://dummy/'),
-            sensors=["test", "qwerty?"]
+            sensors=["sensor 1@home/sensor/test", "sensor 2?@test/topic2"]
         )
         bot.add_handler(handler)
         yield handler
