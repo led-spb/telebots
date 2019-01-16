@@ -7,17 +7,25 @@ import urlparse
 import uuid
 
 
+class DummyMqtt(object):
+    def subscribe(selfm, topic):
+        pass
+
+
 class TestHomeBot:
 
     @pytest.fixture
-    def handler(self):
+    def handler(self,):
         bot = DummyBot()
+        dummy_mqtt = DummyMqtt()
 
         handler = HomeBotHandler(
             ioloop=None,
             mqtt_url=urlparse.urlparse('mqtt://dummy/'),
-            sensors=["sensor 1@home/sensor/test", "sensor 2?@test/topic2"]
+            sensors=["door://sensor 1@home/sensor/test", "presence://wireless_sensor@home/wireless/00:AA:BB:CC"],
+            cameras=["+"]
         )
+        handler.on_mqtt_connect(dummy_mqtt, None, None, 0)
         bot.add_handler(handler)
         yield handler
 
@@ -65,7 +73,7 @@ class TestHomeBot:
     def test_status_common(self, handler):
         message = DummyMqttMessage()
         message.retain = False
-        message.topic = 'home/sensor/test'
+        message.topic = 'home/wireless/00:AA:BB:CC'
         message.payload = '1'
         handler.on_mqtt_message(None, None, message)
         assert len(handler.bot.messages) == len(handler.bot.admins)
