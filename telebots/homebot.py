@@ -226,7 +226,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         for chat_id in self.bot.admins:
             self.bot.send_message(
                 to=chat_id,
-                message="<b>%s<b>: %s" % (sensor.name, payload),
+                message="<b>%s</b>: %s" % (sensor.name, payload),
                 parse_mode='HTML'
             )
         pass
