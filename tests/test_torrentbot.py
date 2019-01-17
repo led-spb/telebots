@@ -1,58 +1,42 @@
-from dummy_bot import DummyBot
+from dummy_objects import DummyBot, DummyHTTPClient
 import telebots
 from telebots.torrentbot import TransmissionManager, UpdateChecker, NonameClub
-from tornado.httpclient import HTTPError
-from tornado.ioloop import IOLoop
 from tornado import gen
+from tornado.ioloop import IOLoop
 import json
 import pytest
 import uuid
+import random
 from functools import partial
 
 
-class DummyResponse(object):
-    def __init__(self, **kwargs):
-        map(lambda item: setattr(self, item[0], item[1]), kwargs.items())
-
-    def rethrow(self):
-        if hasattr(self, 'code') and getattr(self, 'code') >= 399:
-            raise HTTPError(code=getattr(self, 'code'), message="HTTPError")
-        pass
-
-
-class DummyHTTPClient(object):
-    def __init__(self):
-        self.responses = []
-
+def async_wait(routine, timeout=15):
     @gen.coroutine
-    def fetch(self, *args, **kwargs):
-        raise gen.Return(self.responses.pop(0))
-        pass
+    def start(func):
+        result = yield gen.maybe_future(func())
+        raise gen.Return(result)
 
-    def add(self, **kwargs):
-        self.responses.append(DummyResponse(**kwargs))
-
-
-@pytest.fixture
-def dummy_client():
-    client = DummyHTTPClient()
-    yield client
+    IOLoop.current().run_sync(partial(start, routine), timeout)
     pass
 
-@pytest.fixture
-def manager(dummy_client):
-    manager = TransmissionManager(url="http://localhost:9091")
-    manager.client = dummy_client
-    yield manager
 
 @pytest.fixture
-def noname_helper(dummy_client):
+def manager():
+    client = DummyHTTPClient(random_delay=1)
+    manager = TransmissionManager(url="http://localhost:9091")
+    manager.client = client
+    yield manager
+
+
+@pytest.fixture
+def noname_helper():
+    client = DummyHTTPClient(random_delay=1)
     helper = NonameClub(url="http://test_user:heres@nnm-club.to", proxy=None)
-    helper.client = dummy_client
+    helper.client = client
     yield helper
 
 
-class TestNonameHelper:
+class TestNonameHelper(object):
     no_login_page = """
     <form action="login.php"/>
         <input type="hidden" name="redirect" value="" />
@@ -125,8 +109,8 @@ class TestNonameHelper:
         assert results[0].link == noname_helper.base_url + 'forum/?t=123456789'
 
 
-class TestManager:
-    def test_torrent_list(self, manager, dummy_client):
+class TestManager(object):
+    def test_torrent_list(self, manager):
         response = {
             "result": "success",
             "arguments": {
@@ -134,44 +118,79 @@ class TestManager:
                 ]
             }
         }
-        dummy_client.add(code=200, headers={}, body=json.dumps(response))
+        manager.client.add(code=200, headers={}, body=json.dumps(response))
         torrents = IOLoop.current().run_sync(
             manager.get_torrents
         )
         assert len(torrents) == 0
 
 
-class TestTorrentBot:
+@pytest.fixture(name='bot_handler')
+def make_bot_handler(manager, noname_helper):
+    bot = DummyBot()
 
-    @pytest.fixture
-    def handler(self):
-        bot = DummyBot()
+    handler = UpdateChecker(
+        manager=manager,
+        trackers=[noname_helper]
+    )
+    bot.add_handler(handler)
+    yield handler
 
-        handler = UpdateChecker(
-            manager=None,
-            trackers=[]
+
+class TestTorrentBot(object):
+    def test_version(self, bot_handler):
+        user_id = bot_handler.bot.admin
+        chat_id = random.randint(1, 10000)
+
+        assert bot_handler.bot.exec_command(
+            message={"from": {"id": user_id}, "chat": {"id": chat_id}, "text": "/version"}
         )
-        bot.add_handler(handler)
-        yield handler
+        assert len(bot_handler.bot.messages) == 1
+        message = bot_handler.bot.messages.pop()
+        assert message['to'] == chat_id
+        assert message['message'] == str(telebots.version)
 
-    def test_version(self, handler):
-        assert handler.bot.exec_command(
+    def test_unauth(self, bot_handler):
+        user_id = bot_handler.bot.admin + 1000
+        chat_id = random.randint(1, 10000)
+
+        # search query
+        assert not bot_handler.bot.exec_command(
+            message={"from": {"id": user_id}, "chat": {"id": chat_id}, "text": str(uuid.uuid4())}
+        )
+        assert len(bot_handler.bot.messages) == 0
+        # /version
+        assert not bot_handler.bot.exec_command(
+            message={"from": {"id": user_id}, "chat": {"id": chat_id}, "text": "/version"}
+        )
+        assert len(bot_handler.bot.messages) == 0
+        # /status
+        assert not bot_handler.bot.exec_command(
+            message={"from": {"id": user_id}, "chat": {"id": chat_id}, "text": "/status"}
+        )
+        assert len(bot_handler.bot.messages) == 0
+        # /update
+        assert not bot_handler.bot.exec_command(
+            message={"from": {"id": user_id}, "chat": {"id": chat_id}, "text": "/update"}
+        )
+        assert len(bot_handler.bot.messages) == 0
+
+    def test_search(self, bot_handler):
+        user_id = bot_handler.bot.admin
+        chat_id = random.randint(1, 10000)
+
+        executor = partial(
+            bot_handler.bot.exec_command,
             message={
-                "from": {"id": handler.bot.admin},
-                "chat": {"id": 1234},
-                "text": "/version"
+                "message_id": random.randint(0, 10000),
+                "from": {"id": user_id},
+                "chat": {"id": chat_id},
+                "text": str(uuid.uuid4())
             }
         )
-        assert len(handler.bot.messages) == 1
-        assert handler.bot.messages[0]['to'] == 1234
-        assert handler.bot.messages[0]['message'] == str(telebots.version)
+        async_wait(executor)
 
-    def test_command_unauth(self, handler):
-        assert not handler.bot.exec_command(
-            message={
-                "from": {"id": handler.bot.admin + 1000},
-                "chat": {"id": -1},
-                "text": "search query"
-            }
-        )
-        assert len(handler.bot.messages) == 0
+        assert len(bot_handler.bot.messages) == 1
+        message = bot_handler.bot.messages.pop()
+        assert message['to'] == chat_id
+        assert message['message'] == "Search in progress..."

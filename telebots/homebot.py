@@ -63,10 +63,12 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
             sensor_type = parsed.scheme
             name = parsed.username
 
-            self.sensors[topic] = Sensor(topic=topic, sensor_type=sensor_type, name=name.strip('!'), silence=name.endswith('!'))
+            self.sensors[topic] = Sensor(
+                topic=topic, sensor_type=sensor_type, name=name.strip('!'), silence=name.endswith('!')
+            )
 
         self.cameras = cameras or []
-        self.event_gap = 300
+        self.trigger_gap = 300
         self.http_client = AsyncHTTPClient()
 
         self.jinja = Environment()
@@ -181,14 +183,17 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
 
     @PatternMessageHandler("/status", authorized=True)
     def cmd_status(self, chat):
-        for sensor in self.sensors.values():
-            self.notify_sensor(chat['id'], sensor)
+        self.notify_sensor(chat['id'])
         return True
 
-    def notify_sensor(self, chat_id, sensor):
-        self.bot.send_message(
+    def notify_sensor(self, chat_id, sensor=None):
+        messages = [
+            self.sensor_template.render(sensor=item)
+            for item in self.sensors.values() if sensor is None or item == sensor
+        ]
+        return self.bot.send_message(
             to=chat_id,
-            message=self.sensor_template.render(sensor=sensor),
+            message="\n".join(messages),
             parse_mode='HTML'
         )
 
@@ -244,7 +249,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         sensor.state = status
         sensor.changed = now
 
-        if status > 0 and (now-sensor.triggered) > self.event_gap:
+        if status > 0 and (now-sensor.triggered) > self.trigger_gap:
             sensor.triggered = now
             if not sensor.silence:
                 for chat_id in self.bot.admins:

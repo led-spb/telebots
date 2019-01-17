@@ -762,7 +762,6 @@ class HTTPRequestHandler(tornado.web.RequestHandler):
         for attr, value in kwargs.iteritems():
             setattr(self, attr, value)
 
-    @tornado.web.asynchronous
     def post(self, *args, **kwargs):
         self.updater.do_notify(self.request.body)
 
