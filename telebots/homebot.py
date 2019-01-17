@@ -224,7 +224,11 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
     def event_notify(self, sensor, topic, payload):
         self.logger.info("Event notify")
         for chat_id in self.bot.admins:
-            self.bot.send_message(to=chat_id, message=payload, parse_mode='HTML')
+            self.bot.send_message(
+                to=chat_id,
+                message="<b>%s<b>: %s" % (sensor.name, payload),
+                parse_mode='HTML'
+            )
         pass
 
     def event_sensor(self, sensor, topic, payload):

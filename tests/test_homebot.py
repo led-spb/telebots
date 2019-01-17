@@ -119,7 +119,7 @@ class TestHomeBot(object):
 
         assert len(handler.bot.messages) == len(handler.bot.admins)
         assert handler.bot.messages[0]['to'] == handler.bot.admin
-        assert handler.bot.messages[0]['message'] == message.payload
+        assert message.payload in handler.bot.messages[0]['message']
 
     def test_event_photo(self, handler):
         message = DummyMqttMessage()
