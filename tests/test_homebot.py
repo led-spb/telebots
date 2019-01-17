@@ -16,8 +16,12 @@ def handler():
     handler = HomeBotHandler(
         ioloop=None,
         mqtt_url=urlparse.urlparse('mqtt://dummy/'),
-        sensors=["door://sensor 1@home/sensor/test", "presence://wireless_sensor@home/wireless/00:AA:BB:CC"],
-        cameras=["+"]
+        sensors=[
+            "door://sensor 1@home/sensor/test",
+            "presence://wireless_sensor@home/wireless/00:AA:BB:CC",
+            "notify://notify@home/notify",
+            "camera://test@home/camera/test"
+        ],
     )
     handler.on_mqtt_connect(dummy_mqtt, None, None, 0)
     bot.add_handler(handler)

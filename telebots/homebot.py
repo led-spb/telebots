@@ -21,9 +21,11 @@ import telebots
 
 
 class Sensor(object):
-    __slots__ = ['topic', 'sensor_type', 'name', 'state', 'changed', 'triggered', 'silence']
+    __slots__ = ['topic', 'sensor_type', 'name', 'state', 'changed', 'triggered', 'silence', 'handler']
     type_names = {
         "_": ("alert", "normal"),
+        "camera": ("started", "down"),
+        "notify": ("alert", "normal"),
         "door": ("opened", "closed"),
         "presence": ("home", "away"),
         "motion": ("motion", "still")
@@ -37,7 +39,16 @@ class Sensor(object):
         self.changed = 0
         self.triggered = 0
         self.silence = silence
+        self.handler = None
         pass
+
+    @classmethod
+    def from_url(cls, url):
+        parsed = urlparse.urlparse(url)
+        topic = parsed.hostname + parsed.path
+        sensor_type = parsed.scheme
+        name = parsed.username
+        return cls(topic=topic, sensor_type=sensor_type, name=name.strip('!'), silence=name.endswith('!'))
 
     def state_text(self):
         if self.sensor_type in Sensor.type_names:
@@ -48,26 +59,22 @@ class Sensor(object):
 
 
 class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
-    def __init__(self, ioloop, mqtt_url, sensors=None, cameras=None):
+    def __init__(self, ioloop, mqtt_url, sensors=[]):
         BotRequestHandler.__init__(self)
         self.logger = logging.getLogger(self.__class__.__name__)
         self.ioloop = ioloop
-
         self.sensors = {}
-        self.mqtt_handlers = {}
+        for url in sensors or []:
+            sensor = Sensor.from_url(url)
+            if sensor.sensor_type == "camera":
+                sensor.topic = sensor.topic + "/+"
+                sensor.handler = self.event_camera
+            elif sensor.sensor_type == "notify":
+                sensor.handler = self.event_notify
+            else:
+                sensor.handler = self.event_sensor
+            self.sensors[sensor.topic] = sensor
 
-        for sensor in sensors or []:
-            parsed = urlparse.urlparse(sensor)
-
-            topic = parsed.hostname+parsed.path
-            sensor_type = parsed.scheme
-            name = parsed.username
-
-            self.sensors[topic] = Sensor(
-                topic=topic, sensor_type=sensor_type, name=name.strip('!'), silence=name.endswith('!')
-            )
-
-        self.cameras = cameras or []
         self.trigger_gap = 300
         self.http_client = AsyncHTTPClient()
 
@@ -80,8 +87,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         host = mqtt_url.hostname
         port = mqtt_url.port if mqtt_url.port is not None else 1883
 
-        self.logger.info("Trying connect to MQTT broker at %s:%d" %
-                         (host, port))
+        self.logger.info("Trying connect to MQTT broker at %s:%d" % (host, port))
 
         self.subscribe = False
         mqtt.TornadoMqttClient.__init__(
@@ -100,37 +106,21 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
     def on_mqtt_connect(self, client, obj, flags, rc):
         self.logger.info("MQTT broker: %s", mqtt.connack_string(rc))
         if rc == 0:
-            subscriptions = [
-                (["home/notify"], self.event_notify),
-                (["%s" % x.topic for x in self.sensors.values()], self.event_sensor),
-                (["home/camera/%s/#" % x for x in self.cameras], self.event_camera)
-            ]
-            for subs in subscriptions:
-                if len(subs[0])>0:
-                    self.logger.debug("Subscribe for topics %s, handler %s", str(subs[0]), str(subs[1]))
-                for topic in subs[0]:
-                    client.subscribe(topic)
-                    self.mqtt_handlers[topic] = subs[1]
+            # Subscribe sensors topics
+            for sensor in self.sensors.values():
+                client.subscribe(sensor.topic)
         pass
 
     def on_mqtt_message(self, client, obj, message):
         if message.retain:
             return
-
         self.logger.info("topic %s, payload: %s" % (
             message.topic,
             "[binary]" if len(message.payload) > 10 else message.payload
         ))
-        for sub, handler in self.mqtt_handlers.items():
+        for sub, sensor in self.sensors.items():
             if topic_matches_sub(sub, message.topic):
-                self.logger.debug("Event handler: %s", )
-                return handler(message.topic, message.payload)
-        pass
-
-    def exec_event(self, name, path, payload):
-        if hasattr(self, "event_"+name):
-            handler = getattr(self, "event_"+name)
-            handler(path, payload)
+                return sensor.handler(sensor, message.topic, message.payload)
         pass
 
     @PatternMessageHandler('/photo', authorized=True)
@@ -189,18 +179,14 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
     def notify_sensor(self, chat_id, sensor=None):
         messages = [
             self.sensor_template.render(sensor=item)
-            for item in self.sensors.values() if sensor is None or item == sensor
+            for item in self.sensors.values()
+            if (sensor is None or item == sensor) and item.sensor_type not in ['camera', 'notify']
         ]
-        return self.bot.send_message(
-            to=chat_id,
-            message="\n".join(messages),
-            parse_mode='HTML'
-        )
+        return self.bot.send_message(to=chat_id, message="\n".join(messages), parse_mode='HTML')
 
-    def event_camera(self, topic, payload):
+    def event_camera(self, camera, topic, payload):
         path = topic.split('/')
         event_type = path.pop()
-        cam_no = path.pop()
 
         if event_type == 'photo':
             markup = None
@@ -217,7 +203,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
                     to=chat_id,
                     message=Photo(
                         photo=File('image.jpg', StringIO(payload), 'image/jpeg'),
-                        caption='camera#%s' % cam_no
+                        caption='camera#%s' % camera.name
                     ),
                     reply_markup=markup
                 )
@@ -235,17 +221,16 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
                 )
         pass
 
-    def event_notify(self, topic, payload):
+    def event_notify(self, sensor, topic, payload):
         self.logger.info("Event notify")
         for chat_id in self.bot.admins:
-            self.bot.send_message(to=chat_id, message=payload)
+            self.bot.send_message(to=chat_id, message=payload, parse_mode='HTML')
         pass
 
-    def event_sensor(self, topic, payload):
+    def event_sensor(self, sensor, topic, payload):
         status = int(payload)
         now = time.time()
 
-        sensor = self.sensors[topic]
         sensor.state = status
         sensor.changed = now
 
@@ -277,8 +262,7 @@ def main():
     basic.add_argument("-v", action="store_true", default=False, help="Verbose logging", dest="verbose")
 
     status = parser.add_argument_group('status', 'Home state parameters')
-    status.add_argument("--sensors", nargs="*", help="Sensor in format mqtt_topic:name[?]")
-    status.add_argument("--cameras", nargs="*", help="Notify state of this camera")
+    status.add_argument("--sensors", nargs="*", help="Sensor in URL format: type://name[!]@mqtt_topic")
 
     args = parser.parse_args()
 
@@ -290,15 +274,8 @@ def main():
     )
     logging.info("Starting telegram bot")
     ioloop = IOLoop.instance()
-
-    handler = HomeBotHandler(
-        ioloop,
-        args.url,
-        sensors=args.sensors,
-        cameras=args.cameras
-    )
+    handler = HomeBotHandler(ioloop, args.url, sensors=args.sensors)
     bot = Bot(args.token, args.admins, proxy=args.proxy, ioloop=ioloop)
-    # Default handler
     bot.add_handler(handler)
     bot.loop_start()
     handler.start()
