@@ -21,26 +21,56 @@ import telebots
 
 
 class Sensor(object):
-    __slots__ = ['topic', 'sensor_type', 'name', 'state', 'changed', 'triggered', 'silence', 'handler']
-    type_names = {
-        "_": ("alert", "normal"),
-        "camera": ("started", "down"),
-        "notify": ("alert", "normal"),
-        "door": ("opened", "closed"),
-        "presence": ("home", "away"),
-        "motion": ("motion", "still")
-    }
+    __states__ = ('alert', 'normal')
 
-    def __init__(self, topic, sensor_type, name, silence=False):
-        self.topic = topic
-        self.sensor_type = sensor_type
-        self.name = name
-        self.state = 0
-        self.changed = 0
-        self.triggered = 0
-        self.silence = silence
-        self.handler = None
+    def __init__(self, topic, sensor_type, name, silence=False, dummy=False):
+        self._topic = topic
+        self._type = sensor_type
+        self._name = name
+        self._state = 0
+        self._changed = 0
+        self._triggered = 0
+        self._silence = silence
+        self._handler = None
+        self.is_dummy = dummy
         pass
+
+    @property
+    def topic(self):
+        return self._topic
+
+    @property
+    def type(self):
+        return self._type
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def silence(self):
+        return self._silence
+
+    @property
+    def state(self):
+        return self._state
+
+    @state.setter
+    def state(self, value):
+        self._state = value
+        self._changed = time.time()
+
+    @property
+    def changed(self):
+        return self._changed
+
+    @property
+    def triggered(self):
+        return self._triggered
+
+    @triggered.setter
+    def triggered(self, value):
+        self._triggered = value
 
     @classmethod
     def from_url(cls, url):
@@ -48,14 +78,47 @@ class Sensor(object):
         topic = parsed.hostname + parsed.path
         sensor_type = parsed.scheme
         name = parsed.username
+
+        for sub_class in cls.__subclasses__():
+            if sensor_type in sub_class.__names__:
+                return sub_class(
+                    topic=topic, sensor_type=sensor_type, name=name.strip('!'), silence=name.endswith('!')
+                )
+        # default class
         return cls(topic=topic, sensor_type=sensor_type, name=name.strip('!'), silence=name.endswith('!'))
 
     def state_text(self):
-        if self.sensor_type in Sensor.type_names:
-            names = Sensor.type_names[self.sensor_type]
-        else:
-            names = Sensor.type_names["_"]
-        return names[int(not self.state)]
+        return self.__states__[int(not self.state)]
+
+
+class DummySensor(Sensor):
+    __names__ = ['notify']
+
+    def __init__(self, topic, sensor_type, name, silence=False):
+        Sensor.__init__(self, topic, sensor_type, name, silence, dummy=True)
+
+
+class CameraSensor(Sensor):
+    __names__ = ['camera']
+
+    def __init__(self, topic, sensor_type, name, silence=False):
+        topic = topic + '/#'
+        Sensor.__init__(self, topic, sensor_type, name, silence, dummy=True)
+
+
+class DoorSensor(Sensor):
+    __names__ = ['door']
+    __states__ = ['opened', 'closed']
+
+
+class MotionSensor(Sensor):
+    __names__ = ['motion']
+    __states__ = ['active', 'passive']
+
+
+class PresenceSensor(Sensor):
+    __names__ = ['presence', 'wireless']
+    __states__ = ['home', 'away']
 
 
 class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
@@ -64,12 +127,12 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.ioloop = ioloop
         self.sensors = {}
+
         for url in sensors or []:
             sensor = Sensor.from_url(url)
-            if sensor.sensor_type == "camera":
-                sensor.topic = sensor.topic + "/+"
+            if sensor.type == "camera":
                 sensor.handler = self.event_camera
-            elif sensor.sensor_type == "notify":
+            elif sensor.type == "notify":
                 sensor.handler = self.event_notify
             else:
                 sensor.handler = self.event_sensor
@@ -118,8 +181,8 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
             message.topic,
             "[binary]" if len(message.payload) > 10 else message.payload
         ))
-        for sub, sensor in self.sensors.items():
-            if topic_matches_sub(sub, message.topic):
+        for sensor in self.sensors.values():
+            if topic_matches_sub(sensor.topic, message.topic):
                 return sensor.handler(sensor, message.topic, message.payload)
         pass
 
@@ -180,7 +243,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         messages = [
             self.sensor_template.render(sensor=item)
             for item in self.sensors.values()
-            if (sensor is None or item == sensor) and item.sensor_type not in ['camera', 'notify']
+            if (sensor is None or item == sensor) and not item.is_dummy
         ]
         return self.bot.send_message(to=chat_id, message="\n".join(messages), parse_mode='HTML')
 
@@ -236,7 +299,6 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         now = time.time()
 
         sensor.state = status
-        sensor.changed = now
 
         if status > 0 and (now-sensor.triggered) > self.trigger_gap:
             sensor.triggered = now
