@@ -155,7 +155,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
             ]
             self.bot.send_message(
                 to=chat['id'], message="Which sensor?",
-                reply_markup={'inline_keyboard': [buttons, [{'callback_data': '/sensor', 'text': 'Back'}]]},
+                reply_markup={'inline_keyboard': [buttons]},
                 parse_mode='HTML'
             )
 
@@ -170,7 +170,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
                 reply_markup={
                     'inline_keyboard': [
                         buttons,
-                        [{'callback_data': '/sensor %s' % sensor.name, 'text': 'Back'}]
+                        [{'callback_data': '/sensor', 'text': 'Back'}]
                     ]
                 },
                 parse_mode='HTML'
