@@ -8,7 +8,6 @@ import argparse
 import time
 import datetime
 import urlparse
-import json
 import paho_async.client as mqtt
 from cStringIO import StringIO
 from pytelegram_async.bot import Bot, BotRequestHandler, PatternMessageHandler
@@ -106,15 +105,6 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         self.http_client.fetch("http://127.0.0.1:8082/0/action/snapshot")
         return True
 
-    @PatternMessageHandler('/sub( .*)?', authorized=True)
-    def cmd_sub(self, text):
-        args = text.split()
-        if len(args) < 1 or args[0].lower() != 'off':
-            self.subscribe = True
-        else:
-            self.subscribe = False
-        return True
-
     @PatternMessageHandler("/video( .*)?", authorized=True)
     def cmd_video(self, chat, text):
         params = text.split()
@@ -163,17 +153,11 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
                 {'callback_data': '/sensor %s' % item.name, 'text': item.name}
                 for item in self.sensors
             ]
-            if message_id is None:
-                self.bot.send_message(
-                    to=chat['id'], message="Which sensor?", reply_markup={'inline_keyboard': [buttons]},
-                    parse_mode='HTML'
-                )
-            else:
-                self.bot.edit_message_text(
-                    to=chat['id'], message_id=message_id, message="Unknown sensor...\nWhich sensor?",
-                    reply_markup={'inline_keyboard': [buttons]},
-                    parse_mode='HTML'
-                )
+            self.bot.send_message(
+                to=chat['id'], message="Which sensor?",
+                reply_markup={'inline_keyboard': [buttons, [{'callback_data': '/sensor', 'text': 'Back'}]]},
+                parse_mode='HTML'
+            )
 
         def show_sensor_menu(sensor):
             buttons = [
@@ -181,17 +165,16 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
                 {'callback_data': '/sensor %s 0' % sensor.name, 'text': 'Unsubscribe'}
             ]
             message = self.sensor_full_template.render(sensor=sensor)
-            if message_id is None:
-                self.bot.send_message(
-                    to=chat['id'], message=message, reply_markup={'inline_keyboard': [buttons]},
-                    parse_mode='HTML'
-                )
-            else:
-                self.bot.edit_message_text(
-                    to=chat['id'], message_id=message_id, message=message,
-                    reply_markup={'inline_keyboard': [buttons]},
-                    parse_mode='HTML'
-                )
+            self.bot.edit_message_text(
+                to=chat['id'], message_id=message_id, text=message,
+                reply_markup={
+                    'inline_keyboard': [
+                        buttons,
+                        [{'callback_data': '/sensor %s' % sensor.name, 'text': 'Back'}]
+                    ]
+                },
+                parse_mode='HTML'
+            )
             pass
 
         if len(params) == 1:
@@ -215,7 +198,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
 
             if message_id is not None:
                 self.bot.edit_message_text(
-                    to=chat['id'], message_id=message_id, message='Sensor <b>%s</b> changed' % sensor.name,
+                    to=chat['id'], message_id=message_id, text='Sensor <b>%s</b> changed' % sensor.name,
                     parse_mode='HTML'
                 )
         return True
