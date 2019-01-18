@@ -8,6 +8,7 @@ import argparse
 import time
 import datetime
 import urlparse
+import json
 import paho_async.client as mqtt
 from cStringIO import StringIO
 from pytelegram_async.bot import Bot, BotRequestHandler, PatternMessageHandler
@@ -18,125 +19,17 @@ from jinja2 import Environment
 from paho.mqtt.client import topic_matches_sub
 import humanize
 import telebots
-
-
-class Sensor(object):
-    __states__ = ('alert', 'normal')
-
-    def __init__(self, topic, sensor_type, name, silence=False, dummy=False):
-        self._topic = topic
-        self._type = sensor_type
-        self._name = name
-        self._state = 0
-        self._changed = 0
-        self._triggered = 0
-        self._silence = silence
-        self._handler = None
-        self.is_dummy = dummy
-        pass
-
-    @property
-    def topic(self):
-        return self._topic
-
-    @property
-    def type(self):
-        return self._type
-
-    @property
-    def name(self):
-        return self._name
-
-    @property
-    def silence(self):
-        return self._silence
-
-    @property
-    def state(self):
-        return self._state
-
-    @state.setter
-    def state(self, value):
-        self._state = value
-        self._changed = time.time()
-
-    @property
-    def changed(self):
-        return self._changed
-
-    @property
-    def triggered(self):
-        return self._triggered
-
-    @triggered.setter
-    def triggered(self, value):
-        self._triggered = value
-
-    @classmethod
-    def from_url(cls, url):
-        parsed = urlparse.urlparse(url)
-        topic = parsed.hostname + parsed.path
-        sensor_type = parsed.scheme
-        name = parsed.username
-
-        for sub_class in cls.__subclasses__():
-            if sensor_type in sub_class.__names__:
-                return sub_class(
-                    topic=topic, sensor_type=sensor_type, name=name.strip('!'), silence=name.endswith('!')
-                )
-        # default class
-        return cls(topic=topic, sensor_type=sensor_type, name=name.strip('!'), silence=name.endswith('!'))
-
-    def state_text(self):
-        return self.__states__[int(not self.state)]
-
-
-class DummySensor(Sensor):
-    __names__ = ['notify']
-
-    def __init__(self, topic, sensor_type, name, silence=False):
-        Sensor.__init__(self, topic, sensor_type, name, silence, dummy=True)
-
-
-class CameraSensor(Sensor):
-    __names__ = ['camera']
-
-    def __init__(self, topic, sensor_type, name, silence=False):
-        topic = topic + '/#'
-        Sensor.__init__(self, topic, sensor_type, name, silence, dummy=True)
-
-
-class DoorSensor(Sensor):
-    __names__ = ['door']
-    __states__ = ['opened', 'closed']
-
-
-class MotionSensor(Sensor):
-    __names__ = ['motion']
-    __states__ = ['active', 'passive']
-
-
-class PresenceSensor(Sensor):
-    __names__ = ['presence', 'wireless']
-    __states__ = ['home', 'away']
+from functools import reduce
+from sensors import Sensor
 
 
 class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
-    def __init__(self, ioloop, mqtt_url, sensors=[]):
+    def __init__(self, ioloop, admins, mqtt_url, sensors=[]):
         BotRequestHandler.__init__(self)
         self.logger = logging.getLogger(self.__class__.__name__)
         self.ioloop = ioloop
-        self.sensors = {}
 
-        for url in sensors or []:
-            sensor = Sensor.from_url(url)
-            if sensor.type == "camera":
-                sensor.handler = self.event_camera
-            elif sensor.type == "notify":
-                sensor.handler = self.event_notify
-            else:
-                sensor.handler = self.event_sensor
-            self.sensors[sensor.topic] = sensor
+        self.sensors = [self.build_sensor_from_url(url, admins) for url in sensors or []]
 
         self.trigger_gap = 300
         self.http_client = AsyncHTTPClient()
@@ -147,6 +40,14 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
             "<b>{{sensor.name}}</b>: {{ sensor.state_text() }} {{ sensor.changed | human_date }}"
         )
 
+        self.sensor_full_template = self.jinja.from_string(
+            "<b>name</b>: {{sensor.name}}\n"
+            "<b>type</b>: {{sensor.type}}\n"
+            "<b>state</b>: {{sensor.state_text()}}\n"
+            "<b>changed</b>: {{ sensor.changed | human_date }}\n"
+            "<b>triggered</b>: {{ sensor.triggered | human_date }}"
+        )
+
         host = mqtt_url.hostname
         port = mqtt_url.port if mqtt_url.port is not None else 1883
 
@@ -154,11 +55,25 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
 
         self.subscribe = False
         mqtt.TornadoMqttClient.__init__(
-            self, ioloop=ioloop, host=mqtt_url.hostname, port=mqtt_url.port if mqtt_url.port is not None else 1883,
+            self, ioloop=ioloop, host=mqtt_url.hostname,
+            port=mqtt_url.port if mqtt_url.port is not None else 1883,
             username=mqtt_url.username, password=mqtt_url.password
         )
         self.version = telebots.version
         pass
+
+    def build_sensor_from_url(self, url, admins):
+        sensor = Sensor.from_url(url, admins)
+        if sensor.type == "camera":
+            sensor.on_changed = self.event_camera
+        elif sensor.type == "notify":
+            sensor.on_changed = self.event_notify
+        else:
+            sensor.on_changed = self.event_sensor
+        return sensor
+
+    def sensor_by_name(self, name):
+        return reduce(lambda x, y: x if x.name == name else y, self.sensors + [None])
 
     @staticmethod
     def human_date(value):
@@ -170,7 +85,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         self.logger.info("MQTT broker: %s", mqtt.connack_string(rc))
         if rc == 0:
             # Subscribe sensors topics
-            for sensor in self.sensors.values():
+            for sensor in self.sensors:
                 client.subscribe(sensor.topic)
         pass
 
@@ -181,9 +96,9 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
             message.topic,
             "[binary]" if len(message.payload) > 10 else message.payload
         ))
-        for sensor in self.sensors.values():
+        for sensor in self.sensors:
             if topic_matches_sub(sensor.topic, message.topic):
-                return sensor.handler(sensor, message.topic, message.payload)
+                return sensor.process(message.topic, message.payload)
         pass
 
     @PatternMessageHandler('/photo', authorized=True)
@@ -239,72 +154,152 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         self.notify_sensor(chat['id'])
         return True
 
+    @PatternMessageHandler("/sensor( .*)?", authorized=True)
+    def cmd_sensor(self, chat, text, message_id):
+        params = text.split()
+
+        def show_menu():
+            buttons = [
+                {'callback_data': '/sensor %s' % item.name, 'text': item.name}
+                for item in self.sensors
+            ]
+            if message_id is None:
+                self.bot.send_message(
+                    to=chat['id'], message="Which sensor?", reply_markup={'inline_keyboard': [buttons]},
+                    parse_mode='HTML'
+                )
+            else:
+                self.bot.edit_message_text(
+                    to=chat['id'], message_id=message_id, message="Unknown sensor...\nWhich sensor?",
+                    reply_markup={'inline_keyboard': [buttons]},
+                    parse_mode='HTML'
+                )
+
+        def show_sensor_menu(sensor):
+            buttons = [
+                {'callback_data': '/sensor %s 1' % sensor.name, 'text': 'Subscribe'},
+                {'callback_data': '/sensor %s 0' % sensor.name, 'text': 'Unsubscribe'}
+            ]
+            message = self.sensor_full_template.render(sensor=sensor)
+            if message_id is None:
+                self.bot.send_message(
+                    to=chat['id'], message=message, reply_markup={'inline_keyboard': [buttons]},
+                    parse_mode='HTML'
+                )
+            else:
+                self.bot.edit_message_text(
+                    to=chat['id'], message_id=message_id, message=message,
+                    reply_markup={'inline_keyboard': [buttons]},
+                    parse_mode='HTML'
+                )
+            pass
+
+        if len(params) == 1:
+            show_menu()
+        elif len(params) == 2:
+            sensor = self.sensor_by_name(params[1])
+            if sensor is None:
+                show_menu()
+            else:
+                show_sensor_menu(sensor)
+            pass
+        if len(params)==3:
+            sensor = self.sensor_by_name(params[1])
+            if sensor is None:
+                show_menu()
+                return True
+            if int(params[2]) > 0:
+                sensor.add_subscription(chat['id'])
+            else:
+                sensor.remove_subscription(chat['id'])
+
+            if message_id is not None:
+                self.bot.edit_message_text(
+                    to=chat['id'], message_id=message_id, message='Sensor <b>%s</b> changed' % sensor.name,
+                    parse_mode='HTML'
+                )
+        return True
+
     def notify_sensor(self, chat_id, sensor=None):
         messages = [
             self.sensor_template.render(sensor=item)
-            for item in self.sensors.values()
+            for item in self.sensors
             if (sensor is None or item == sensor) and not item.is_dummy
         ]
         return self.bot.send_message(to=chat_id, message="\n".join(messages), parse_mode='HTML')
 
-    def event_camera(self, camera, topic, payload):
-        path = topic.split('/')
-        event_type = path.pop()
+    @PatternMessageHandler('/camera (\S+)', authorized=True)
+    def cmd_camera(self, chat, text):
+        params = text.split()
+        if len(params) != 2:
+            return
+        camera = self.sensor_by_name(params[1])
+        if camera is not None and chat['id'] not in camera.one_time_sub:
+            camera.one_time_sub.append(chat['id'])
+        return True
 
+    def event_camera(self, camera):
+        event_type = camera.event_type
+        self.logger.info("Camera sensor %s triggered for event %s", camera.name, camera.event_type)
+
+        # Photo events send only subscribers
         if event_type == 'photo':
-            markup = None
-            if not self.subscribe:
-                markup = {
-                        'inline_keyboard': [[{
-                            'text': 'Subscribe',
-                            'callback_data': '/sub'
-                        }]]
-                }
-
-            for chat_id in self.bot.admins:
+            markup = {
+                    'inline_keyboard': [[{
+                        'text': 'Subscribe',
+                        'callback_data': '/camera %s' % camera.name
+                    }]]
+            }
+            for chat_id in camera.subscriptions:
                 self.bot.send_message(
                     to=chat_id,
                     message=Photo(
-                        photo=File('image.jpg', StringIO(payload), 'image/jpeg'),
+                        photo=File('image.jpg', StringIO(camera.state), 'image/jpeg'),
                         caption='camera#%s' % camera.name
                     ),
                     reply_markup=markup
                 )
             return None
 
-        if event_type == 'videom' or \
-           (self.subscribe and event_type == 'video'):
-            self.subscribe = False
-            for chat_id in self.bot.admins:
+        if event_type == 'videom':
+            for chat_id in camera.subscriptions:
                 self.bot.send_message(
                     to=chat_id,
                     message=Video(
-                        video=File('video.mp4', StringIO(payload), 'video/mp4')
+                        video=File('camera_%s.mp4' % camera.name, StringIO(camera.state), 'video/mp4')
                     )
                 )
+
+        if event_type == 'video':
+            for chat_id in camera.one_time_sub:
+                self.bot.send_message(
+                    to=chat_id,
+                    message=Video(
+                        video=File('camera_%s.mp4' % camera.name, StringIO(camera.state), 'video/mp4')
+                    )
+                )
+            camera.one_time_sub = []
         pass
 
-    def event_notify(self, sensor, topic, payload):
-        self.logger.info("Event notify")
-        for chat_id in self.bot.admins:
+    def event_notify(self, sensor):
+        self.logger.info("Notify sensor %s triggered", sensor.name)
+        for chat_id in sensor.subscriptions:
             self.bot.send_message(
                 to=chat_id,
-                message="<b>%s</b>: %s" % (sensor.name, payload),
+                message="<b>%s</b>: %s" % (sensor.name, sensor.state),
                 parse_mode='HTML'
             )
         pass
 
-    def event_sensor(self, sensor, topic, payload):
-        status = int(payload)
+    def event_sensor(self, sensor):
+        self.logger.info("Sensor %s changed to %d", sensor.name, sensor.state)
+        status = sensor.state
         now = time.time()
-
-        sensor.state = status
 
         if status > 0 and (now-sensor.triggered) > self.trigger_gap:
             sensor.triggered = now
-            if not sensor.silence:
-                for chat_id in self.bot.admins:
-                    self.notify_sensor(chat_id, sensor)
+            for chat_id in sensor.subscriptions:
+                self.notify_sensor(chat_id, sensor)
         pass
 
 
@@ -340,8 +335,8 @@ def main():
     )
     logging.info("Starting telegram bot")
     ioloop = IOLoop.instance()
-    handler = HomeBotHandler(ioloop, args.url, sensors=args.sensors)
     bot = Bot(args.token, args.admins, proxy=args.proxy, ioloop=ioloop)
+    handler = HomeBotHandler(ioloop=ioloop, admins=bot.admins, mqtt_url=args.url, sensors=args.sensors)
     bot.add_handler(handler)
     bot.loop_start()
     handler.start()
