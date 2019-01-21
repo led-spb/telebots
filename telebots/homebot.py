@@ -72,7 +72,10 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         return sensor
 
     def sensor_by_name(self, name):
-        return reduce(lambda x, y: x if x.name == name else y, self.sensors + [None])
+        for sensor in self.sensors:
+            if sensor.name == name:
+                return sensor
+        return None
 
     @staticmethod
     def human_date(value):
@@ -145,7 +148,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         return True
 
     @PatternMessageHandler("/sensor( .*)?", authorized=True)
-    def cmd_sensor(self, chat, text, message_id):
+    def cmd_sensor(self, chat, text, message_id, is_callback):
         params = text.split()
 
         def show_menu():
@@ -153,11 +156,18 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
                 {'callback_data': '/sensor %s' % item.name, 'text': item.name}
                 for item in self.sensors
             ]
-            self.bot.send_message(
-                to=chat['id'], message="Which sensor?",
-                reply_markup={'inline_keyboard': [buttons]},
-                parse_mode='HTML'
-            )
+            if is_callback is not None and is_callback:
+                self.bot.edit_message_text(
+                    to=chat['id'], message_id=message_id, text='Which sensor?',
+                    reply_markup={'inline_keyboard': [buttons]},
+                    parse_mode='HTML'
+                )
+            else:
+                self.bot.send_message(
+                    to=chat['id'], message="Which sensor?",
+                    reply_markup={'inline_keyboard': [buttons]},
+                    parse_mode='HTML'
+                )
 
         def show_sensor_menu(sensor):
             buttons = [
@@ -186,7 +196,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
             else:
                 show_sensor_menu(sensor)
             pass
-        if len(params)==3:
+        if len(params) == 3:
             sensor = self.sensor_by_name(params[1])
             if sensor is None:
                 show_menu()
@@ -211,7 +221,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         ]
         return self.bot.send_message(to=chat_id, message="\n".join(messages), parse_mode='HTML')
 
-    @PatternMessageHandler('/camera (\S+)', authorized=True)
+    @PatternMessageHandler(r'/camera (\S+)', authorized=True)
     def cmd_camera(self, chat, text):
         params = text.split()
         if len(params) != 2:
