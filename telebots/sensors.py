@@ -123,6 +123,11 @@ class PresenceSensor(Sensor):
     __states__ = ['home', 'away']
 
 
+class DeviceSensor(Sensor):
+    __names__ = ['device']
+    __states__ = ['on', 'off']
+
+
 class DummySensor(Sensor):
     __names__ = ['notify']
 
