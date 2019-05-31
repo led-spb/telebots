@@ -4,167 +4,155 @@ import pytelegram_async.entity
 import pytest
 import urlparse
 import json
-from dummy_bot import DummyBot, DummyMqttMessage
+import random
+import uuid
+from dummy_objects import DummyBot, DummyMqttMessage
 
 
-class TestCarBot:
+@pytest.fixture(name="carbot")
+def make_carbot():
+    bot = DummyBot()
 
-    @pytest.fixture
-    def handler(self):
-        bot = DummyBot()
+    handler = CarMonitor(
+        ioloop=None,
+        url=urlparse.urlparse('mqtt://dummy/'),
+        name='test',
+        track_path='.',
+        api_key=None
+    )
+    bot.add_handler(handler)
+    payload = {
+        "lon": 11.1111,
+        "volt": 3,
+        "_ver": 4, "ttf": 13256, "acc": 14,
+        "_type": "location", "charge": 0, "batt": 23, "sat": "6",
+        "alt": 33.33333, "vel": 0,
+        "tst": 1547438413,
+        "cog": 0,
+        "temp": 0,
+        "src": "gps",
+        "lat": 22.2222
+    }
+    message = DummyMqttMessage()
+    message.topic = "owntracks/" + handler.name + "/tracker"
+    message.payload = json.dumps(payload)
+    message.retain = True
 
-        monitor = CarMonitor(
-            ioloop=None,
-            url=urlparse.urlparse('mqtt://dummy/'),
-            name='test',
-            track_path='.',
-            api_key=None
+    handler.on_mqtt_message(client=None, userdata=None, message=message)
+    yield handler
+
+
+class TestCarBot(object):
+    def test_version(self, carbot):
+        user_id = carbot.bot.admin
+        chat_id = random.randint(0, 100000)
+
+        assert carbot.bot.exec_command(
+            message={"from": {"id": user_id}, "chat": {"id": chat_id}, "text": "/version"}
         )
-        bot.add_handler(monitor)
-        payload = {
-            "lon": 11.1111,
-            "volt": 3,
-            "_ver": 4, "ttf": 13256, "acc": 14,
-            "_type": "location", "charge": 0, "batt": 23, "sat": "6",
-            "alt": 33.33333, "vel": 0,
-            "tst": 1547438413,
-            "cog": 0,
-            "temp": 0,
-            "src": "gps",
-            "lat": 22.2222
-        }
-        message = DummyMqttMessage()
-        message.topic = "owntracks/"+monitor.name+"/tracker"
-        message.payload = json.dumps(payload)
-        message.retain = True
+        assert len(carbot.bot.messages) == 1
+        message = carbot.bot.messages.pop()
+        assert message['to'] == chat_id
+        assert message['message'] == str(telebots.version)
 
-        monitor.on_mqtt_message(
-            client=None, userdata=None,
-            message=message
+    def test_unauth(self, carbot):
+        user_id = carbot.bot.admin + random.randint(1, 10000)
+        chat_id = random.randint(1, 10000)
+
+        # /track
+        assert not carbot.bot.exec_command(
+            message={"from": {"id": user_id}, "chat": {"id": chat_id}, "text": "/track test.gpx"}
         )
-        yield monitor
-
-    def test_version(self, handler):
-        assert handler.bot.exec_command(
-            message={
-                "from": {"id": handler.bot.admin},
-                "chat": {"id": 1234},
-                "text": "/version"
-            }
+        assert len(carbot.bot.messages) == 0
+        # /info
+        assert not carbot.bot.exec_command(
+            message={"from": {"id": user_id}, "chat": {"id": chat_id}, "text": "/info"}
         )
-        assert len(handler.bot.messages) == 1
-        assert handler.bot.messages[0]['to'] == 1234
-        assert handler.bot.messages[0]['message'] == str(telebots.version)
-
-    def test_track_unauth(self, handler):
-        assert not handler.bot.exec_command(
-            message={
-                "from": {"id": handler.bot.admin + 1000},
-                "chat": {"id": -1},
-                "text": "/track test.gpx"
-            }
+        assert len(carbot.bot.messages) == 0
+        # /location
+        assert not carbot.bot.exec_command(
+            message={"from": {"id": user_id}, "chat": {"id": chat_id}, "text": "/location"}
         )
-        assert len(handler.bot.messages) == 0
-
-
-    def test_track_common(self, handler):
-        assert handler.bot.exec_command(
-            message={
-                "from": {"id": handler.bot.admin},
-                "chat": {"id": 1234},
-                "text": "/track"
-            }
+        assert len(carbot.bot.messages) == 0
+        # /debug
+        assert not carbot.bot.exec_command(
+            message={"from": {"id": user_id}, "chat": {"id": chat_id}, "text": "/debug"}
         )
-        assert len(handler.bot.messages) == 1
-        assert handler.bot.messages[0]['to'] == 1234
-        assert handler.bot.messages[0]['message'] == 'which track?'
-
-    def test_track_wrong_track(self, handler):
-        assert handler.bot.exec_command(
-            message={
-                "from": {"id": handler.bot.admin},
-                "chat": {"id": 1234},
-                "text": "/track qwerty.gpx"
-            }
+        assert len(carbot.bot.messages) == 0
+        # /events
+        assert not carbot.bot.exec_command(
+            message={"from": {"id": user_id}, "chat": {"id": chat_id}, "text": "/events"}
         )
-        assert len(handler.bot.messages) == 1
-        assert handler.bot.messages[0]['to'] == 1234
-        assert handler.bot.messages[0]['message'] == 'No tracks'
-
-    def test_info_unauth(self, handler):
-        assert not handler.bot.exec_command(
-            message={
-                "from": {"id": handler.bot.admin + 1000},
-                "chat": {"id": -1},
-                "text": "/info"
-            }
+        assert len(carbot.bot.messages) == 0
+        # random message
+        assert not carbot.bot.exec_command(
+            message={"from": {"id": user_id}, "chat": {"id": chat_id}, "text": str(uuid.uuid4())}
         )
-        assert len(handler.bot.messages) == 0
+        assert len(carbot.bot.messages) == 0
 
-    def test_info_common(self, handler):
-        assert handler.bot.exec_command(
-            message={
-                "from": {"id": handler.bot.admin},
-                "chat": {"id": -1},
-                "text": "/info"
-            }
+    def test_track(self, carbot):
+        user_id = carbot.bot.admin
+        chat_id = random.randint(1, 10000)
+
+        assert carbot.bot.exec_command(
+            message={"from": {"id": user_id}, "chat": {"id": chat_id}, "text": "/track"}
         )
-        assert len(handler.bot.messages) == 1
+        assert len(carbot.bot.messages) == 1
+        message = carbot.bot.messages.pop()
+        assert message['to'] == chat_id
+        assert message['message'] == 'No tracks'
 
-    def test_location_unauth(self, handler):
-        assert not handler.bot.exec_command(
-            message={
-                "from": {"id": handler.bot.admin + 1000},
-                "chat": {"id": -1},
-                "text": "/location"
-            }
+        carbot.bot.clear()
+        assert carbot.bot.exec_command(
+            message={"from": {"id": user_id}, "chat": {"id": chat_id}, "text": "/track qwerty.gpx"}
         )
-        assert len(handler.bot.messages) == 0
+        assert len(carbot.bot.messages) == 1
+        message = carbot.bot.messages.pop()
+        assert message['to'] == chat_id
+        assert message['message'] == 'No tracks'
 
-    def test_location_common(self, handler):
-        handler.bot.exec_command(
-            message={
-                "from": {"id": handler.bot.admin},
-                "chat": {"id": 3456},
-                "text": "/location"
-            }
+    def test_info(self, carbot):
+        user_id = carbot.bot.admin
+        chat_id = random.randint(1, 10000)
+
+        assert carbot.bot.exec_command(
+            message={"from": {"id": user_id}, "chat": {"id": chat_id}, "text": "/info"}
         )
-        assert len(handler.bot.messages) == 1
-        assert handler.bot.messages[0]['to'] == 3456
-        assert isinstance(handler.bot.messages[0]['message'], pytelegram_async.entity.Venue)
+        assert len(carbot.bot.messages) == 1
+        message = carbot.bot.messages.pop()
+        assert message['to'] == chat_id
+        assert isinstance(message['message'], str) or isinstance(message['message'], unicode)
 
-    def test_events_unauth(self, handler):
-        assert not handler.bot.exec_command(
-            message={
-                "from": {"id": handler.bot.admin + 1000},
-                "chat": {"id": -1},
-                "text": "/events"
-            }
+    def test_location(self, carbot):
+        user_id = carbot.bot.admin
+        chat_id = random.randint(1, 10000)
+
+        assert carbot.bot.exec_command(
+            message={"from": {"id": user_id}, "chat": {"id": chat_id}, "text": "/location"}
         )
-        assert len(handler.bot.messages) == 0
+        assert len(carbot.bot.messages) == 1
+        message = carbot.bot.messages.pop()
+        assert message['to'] == chat_id
+        assert isinstance(message['message'], pytelegram_async.entity.Venue)
 
+    def test_events(self, carbot):
+        user_id = carbot.bot.admin
+        chat1_id = random.randint(0, 100000)
+        chat2_id = chat1_id + 1000
 
-    def test_events_common(self, handler):
-        assert handler.bot.exec_command(
-            message={
-                "from": {"id": handler.bot.admin},
-                "chat": {"id": 1234},
-                "text": "/events warn"
-            }
+        assert carbot.bot.exec_command(
+            message={"from": {"id": user_id}, "chat": {"id": chat1_id}, "text": "/events warn"}
         )
-        assert len(handler.bot.messages) == 1
-        assert handler.bot.messages[0]['to'] == 1234
-        assert not handler.subscriptions[1234]
-        handler.bot.clear()
+        assert len(carbot.bot.messages) == 1
+        message = carbot.bot.messages.pop()
+        assert message['to'] == chat1_id
+        assert not carbot.subscriptions[chat1_id]
 
-        assert handler.bot.exec_command(
-            message={
-                "from": {"id": handler.bot.admin},
-                "chat": {"id": 1234},
-                "text": "/events all"
-            }
+        assert carbot.bot.exec_command(
+            message={"from": {"id": user_id}, "chat": {"id": chat2_id}, "text": "/events all"}
         )
-        assert len(handler.bot.messages) == 1
-        assert handler.bot.messages[0]['to'] == 1234
-        assert handler.subscriptions[1234]
-        assert not handler.subscriptions[4321]
+        assert len(carbot.bot.messages) == 1
+        message = carbot.bot.messages.pop()
+        assert message['to'] == chat2_id
+        assert not carbot.subscriptions[chat1_id]
+        assert carbot.subscriptions[chat2_id]
