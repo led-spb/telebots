@@ -142,6 +142,11 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
             )
         return True
 
+    @PatternMessageHandler("/power", authorized=True)
+    def cmd_power(self, chat):
+        self._client.publish('home/tv/control/power', 'off')
+        return True
+
     @PatternMessageHandler("/status", authorized=True)
     def cmd_status(self, chat):
         self.notify_sensor(chat['id'])
