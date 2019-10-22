@@ -4,16 +4,17 @@ import re
 import os
 import os.path
 import logging
+import shlex
 import argparse
+import subprocess
 import time
 import datetime
 import urlparse
 import paho_async.client as mqtt
 from cStringIO import StringIO
-from pytelegram_async.bot import Bot, BotRequestHandler, PatternMessageHandler
+from pytelegram_async.bot import Bot, BotRequestHandler, PatternMessageHandler, MessageHandler
 from pytelegram_async.entity import *
 from tornado.ioloop import IOLoop
-from tornado.httpclient import AsyncHTTPClient
 from jinja2 import Environment
 from paho.mqtt.client import topic_matches_sub
 import humanize
@@ -23,7 +24,7 @@ from sensors import Sensor
 
 
 class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
-    def __init__(self, ioloop, admins, mqtt_url, sensors=[]):
+    def __init__(self, ioloop, admins, mqtt_url, sensors=[], extra_cmds=None):
         BotRequestHandler.__init__(self)
         self.logger = logging.getLogger(self.__class__.__name__)
         self.ioloop = ioloop
@@ -31,7 +32,6 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         self.sensors = [self.build_sensor_from_url(url, admins) for url in sensors or []]
 
         self.trigger_gap = 300
-        self.http_client = AsyncHTTPClient()
 
         self.jinja = Environment()
         self.jinja.filters['human_date'] = self.human_date
@@ -59,6 +59,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
             username=mqtt_url.username, password=mqtt_url.password
         )
         self.version = telebots.version
+        self.shell_commands = extra_cmds or {}
         pass
 
     def build_sensor_from_url(self, url, admins):
@@ -103,11 +104,6 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
                 return sensor.process(message.topic, message.payload)
         pass
 
-    @PatternMessageHandler('/photo', authorized=True)
-    def cmd_photo(self):
-        self.http_client.fetch("http://127.0.0.1:8082/0/action/snapshot")
-        return True
-
     @PatternMessageHandler("/video( .*)?", authorized=True)
     def cmd_video(self, chat, text):
         params = text.split()
@@ -140,11 +136,6 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
                     caption=caption
                 )
             )
-        return True
-
-    @PatternMessageHandler("/power", authorized=True)
-    def cmd_power(self, chat):
-        self._client.publish('home/tv/control/power', 'off')
         return True
 
     @PatternMessageHandler("/status", authorized=True)
@@ -236,6 +227,14 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
             camera.one_time_sub.append(chat['id'])
         return True
 
+    @MessageHandler(authorized=True)  
+    def cmd_shell(self, chat, text):
+        if text in self.shell_commands:
+            command = self.shell_commands[text]
+            logging.debug("Executing shell command: %s", command)
+            subprocess.call(command, shell=True)
+        return False
+
     def event_camera(self, camera):
         event_type = camera.event_type
         self.logger.info("Camera sensor %s triggered for event %s", camera.name, camera.event_type)
@@ -306,7 +305,7 @@ def main():
     class LoadFromFile(argparse.Action):
         def __call__(self, parser, namespace, values, option_string=None):
             with values as f:
-                parser.parse_args(f.read().split(), namespace)
+                parser.parse_args(shlex.split(f.read()), namespace)
 
     parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
 
@@ -316,6 +315,7 @@ def main():
                        help="MQTT Broker address host:port")
     basic.add_argument("--token", help="Telegram API bot token")
     basic.add_argument("--admin", nargs="+", help="Bot admin", type=int, dest="admins")
+    basic.add_argument("--extra", help="Run process on command /command:shell_exe", nargs="*", dest="extra")
     basic.add_argument("--proxy")
     basic.add_argument("--logfile", help="Logging into file")
     basic.add_argument("-v", action="store_true", default=False, help="Verbose logging", dest="verbose")
@@ -334,7 +334,9 @@ def main():
     logging.info("Starting telegram bot")
     ioloop = IOLoop.instance()
     bot = Bot(args.token, args.admins, proxy=args.proxy, ioloop=ioloop)
-    handler = HomeBotHandler(ioloop=ioloop, admins=bot.admins, mqtt_url=args.url, sensors=args.sensors)
+
+    cmds = {x.split(':', 1)[0]: x.split(':', 1)[1] for x in args.extra}
+    handler = HomeBotHandler(ioloop=ioloop, admins=bot.admins, mqtt_url=args.url, sensors=args.sensors, extra_cmds=cmds)
     bot.add_handler(handler)
     bot.loop_start()
     handler.start()
