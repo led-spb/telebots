@@ -14,22 +14,22 @@ import paho_async.client as mqtt
 from cStringIO import StringIO
 from pytelegram_async.bot import Bot, BotRequestHandler, PatternMessageHandler, MessageHandler
 from pytelegram_async.entity import *
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 from jinja2 import Environment
 from paho.mqtt.client import topic_matches_sub
 import humanize
 import telebots
-from functools import reduce
 from sensors import Sensor
 
 
 class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
-    def __init__(self, ioloop, admins, mqtt_url, sensors=[], extra_cmds=None):
+    def __init__(self, ioloop, admins, mqtt_url, sensors=None, extra_cmds=None):
         BotRequestHandler.__init__(self)
         self.logger = logging.getLogger(self.__class__.__name__)
         self.ioloop = ioloop
 
         self.sensors = [self.build_sensor_from_url(url, admins) for url in sensors or []]
+        self.background_processes = []
 
         self.trigger_gap = 300
 
@@ -60,7 +60,28 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         )
         self.version = telebots.version
         self.shell_commands = extra_cmds or {}
+        self._periodic_task = PeriodicCallback(callback=self.periodic_handler, callback_time=1000)
         pass
+
+    def periodic_handler(self):
+        # check background processes for finished and send notification
+        for info in list(self.background_processes):
+            process, chat, command = info
+            if process.poll() is not None:
+                self.background_processes.remove(info)
+
+                logging.info('Command "%s" is ends', command)
+                (result, _) = process.communicate()
+                logging.debug(result)
+                if result is not None and result.strip() != "":
+                    self.bot.send_message(
+                        to=chat['id'], message=result.strip(), parse_mode='HTML'
+                    )
+        pass
+
+    def start(self):
+        super(HomeBotHandler, self).start()
+        self._periodic_task.start()
 
     def build_sensor_from_url(self, url, admins):
         sensor = Sensor.from_url(url, admins)
@@ -232,7 +253,11 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         if text in self.shell_commands:
             command = self.shell_commands[text]
             logging.debug("Executing shell command: %s", command)
-            subprocess.call(command, shell=True)
+            process = subprocess.Popen(
+                shlex.split(command), stderr=subprocess.STDOUT, stdout=subprocess.PIPE
+            )
+            self.background_processes.append((process, chat, command))
+            return True
         return False
 
     def event_camera(self, camera):
