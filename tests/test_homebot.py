@@ -24,6 +24,9 @@ def handler():
             "notify://notify@home/notify",
             "camera://test@home/camera/test"
         ],
+        extra_cmds={
+            '/photo': 'cmd /C dir'
+        }
     )
     handler.on_mqtt_connect(dummy_mqtt, None, None, 0)
     bot.add_handler(handler)
@@ -124,7 +127,7 @@ class TestHomeBot(object):
                      "chat": {"id": chat_id},
                      "text": "/sensor %s 1" % test_sensor.name}
         )
-        assert len(handler.bot.messages) == 0
+        assert len(handler.bot.messages) == 1
         assert test_sensor.subscriptions.pop() == chat_id
 
     def test_status(self, handler):

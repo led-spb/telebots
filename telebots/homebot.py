@@ -173,35 +173,44 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
                 {'callback_data': '/sensor %s' % item.name, 'text': item.name}
                 for item in self.sensors
             ]
-            if is_callback is not None and is_callback:
-                self.bot.edit_message_text(
-                    to=chat['id'], message_id=message_id, text='Which sensor?',
-                    reply_markup={'inline_keyboard': [buttons]},
-                    parse_mode='HTML'
-                )
-            else:
-                self.bot.send_message(
-                    to=chat['id'], message="Which sensor?",
-                    reply_markup={'inline_keyboard': [buttons]},
-                    parse_mode='HTML'
-                )
+            message_text = 'Which sensor?'
+            message_params = {
+                'to': chat['id'],
+                'reply_markup': {'inline_keyboard': [buttons]},
+                'parse_mode': 'HTML',
+                'message': message_text,
+                'text': message_text,
+                'message_id': message_id
+            }
+            send_method = self.bot.send_message
+            if is_callback:
+                send_method = self.bot.edit_message_text
+            send_method(**message_params)
+            pass
 
         def show_sensor_menu(sensor):
             buttons = [
                 {'callback_data': '/sensor %s 1' % sensor.name, 'text': 'Subscribe'},
                 {'callback_data': '/sensor %s 0' % sensor.name, 'text': 'Unsubscribe'}
             ]
-            message = self.sensor_full_template.render(sensor=sensor)
-            self.bot.edit_message_text(
-                to=chat['id'], message_id=message_id, text=message,
-                reply_markup={
+            message_text = self.sensor_full_template.render(sensor=sensor)
+            message_params = {
+                'to': chat['id'],
+                'reply_markup': {
                     'inline_keyboard': [
                         buttons,
                         [{'callback_data': '/sensor', 'text': 'Back'}]
                     ]
-                },
-                parse_mode='HTML'
-            )
+                 },
+                'parse_mode': 'HTML',
+                'message': message_text,
+                'text': message_text,
+                'message_id': message_id
+            }
+            send_method = self.bot.send_message
+            if is_callback:
+                send_method = self.bot.edit_message_text
+            send_method(**message_params)
             pass
 
         if len(params) == 1:
@@ -223,11 +232,18 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
             else:
                 sensor.remove_subscription(chat['id'])
 
-            if message_id is not None:
-                self.bot.edit_message_text(
-                    to=chat['id'], message_id=message_id, text='Sensor <b>%s</b> changed' % sensor.name,
-                    parse_mode='HTML'
-                )
+            message_text = 'Sensor <b>%s</b> changed' % sensor.name
+            message_params = {
+                'to': chat['id'],
+                'parse_mode': 'HTML',
+                'message': message_text,
+                'text': message_text,
+                'message_id': message_id
+            }
+            send_method = self.bot.send_message
+            if is_callback:
+                send_method = self.bot.edit_message_text
+            send_method(**message_params)
         return True
 
     def notify_sensor(self, chat_id, sensor=None):
