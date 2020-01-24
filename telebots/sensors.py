@@ -1,6 +1,7 @@
 from urlparse import urlparse
 from itertools import chain
 import time
+import json
 
 
 def subclasses(cls):
@@ -42,8 +43,12 @@ class Sensor(object):
 
     @state.setter
     def state(self, value):
-        self._state = value
-        self._changed = time.time()
+        if isinstance(value, dict):
+            self._state = value.get('status')
+            self._changed = value.get('changed')
+        else:
+            self._state = value
+            self._changed = time.time()
         if self.on_changed is not None:
             self.on_changed(self)
 
@@ -105,7 +110,7 @@ class Sensor(object):
         return self.__states__[int(not self.state)]
 
     def process(self, topic, payload):
-        self.state = int(payload)
+        self.state = json.loads(payload)
 
 
 class DoorSensor(Sensor):

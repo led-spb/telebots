@@ -126,21 +126,22 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
         pass
 
     @PatternMessageHandler("/video( .*)?", authorized=True)
-    def cmd_video(self, chat, text):
+    def cmd_video(self, chat, text, message_id, is_callback):
         params = text.split()
         video = params[1] if len(params) > 1 else None
 
         if video is None:
-            files = sorted([x for x in os.listdir('/home/hub/motion')
+            files = sorted([x for x in os.listdir('/home/hub/motion/storage')
                             if re.match(r'\d{8}_\d{6}\.mp4', x)], reverse=True)
 
             buttons = [{
                 'callback_data': '/video '+fname,
                 'text': re.sub(r'^\d{8}_(\d{2})(\d{2}).*$', '\\1:\\2', fname)
             } for fname in files]
+            max_btn_inrow = 6
             keyboard = [
                 x for x in [
-                    buttons[i*7:(i+1)*7] for i in range(len(buttons)/7+1)
+                    buttons[i*max_btn_inrow:(i+1)*max_btn_inrow] for i in range(len(buttons)/max_btn_inrow+1)
                 ] if len(x) > 0
             ]
             self.bot.send_message(
@@ -153,7 +154,7 @@ class HomeBotHandler(BotRequestHandler, mqtt.TornadoMqttClient):
             self.bot.send_message(
                 to=chat.get('id'),
                 message=Video(
-                    video=File('video.mp4', open('/home/hub/motion/'+video, 'rb'), 'video/mp4'),
+                    video=File('video.mp4', open('/home/hub/motion/storage/'+video, 'rb'), 'video/mp4'),
                     caption=caption
                 )
             )
